@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore SpotifyLibraryBrowser.slnx
+
+      # Warnings are failures here. The app is built on the rule that nothing deprecated gets
+      # used, and an obsolete-API warning is exactly how that rule breaks quietly.
+      - name: Build
+        run: dotnet build SpotifyLibraryBrowser.slnx --configuration Release --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test SpotifyLibraryBrowser.slnx --configuration Release --no-build
+
+      # Publishing exercises code paths a test run doesn't: `dotnet test` only builds the projects
+      # the tests reference, so a compile error in the UI can otherwise reach a green run.
+      - name: Publish
+        run: >
+          dotnet publish src/SpotifyLibraryBrowser.App
+          --configuration Release
+          --runtime win-x64
+          --self-contained false
+          --output publish/win-x64
+
+  core-is-portable:
+    name: Core builds and tests (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Core carries all the logic and is meant to be UI-free and platform-agnostic. Building and
+      # testing it away from Windows is what keeps that true, rather than merely intended.
+      - name: Test Core
+        run: dotnet test tests/SpotifyLibraryBrowser.Core.Tests --configuration Release
