@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SpotifyLibraryBrowser.App/SpotifyLibraryBrowser.App.csproj" />
+    <Project Path="src/SpotifyLibraryBrowser.Core/SpotifyLibraryBrowser.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SpotifyLibraryBrowser.Core.Tests/SpotifyLibraryBrowser.Core.Tests.csproj" />
+  </Folder>
+</Solution>

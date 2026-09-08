@@ -1,0 +1,272 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SpotifyLibraryBrowser.App.ViewModels"
+        xmlns:browsing="using:SpotifyLibraryBrowser.Core.Browsing"
+        x:Class="SpotifyLibraryBrowser.App.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
+        Title="Spotify Library Browser"
+        Width="1280" Height="800"
+        MinWidth="820" MinHeight="520">
+
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+L" Command="{Binding LikeSelectionCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+L" Command="{Binding UnlikeSelectionCommand}" />
+        <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoLikeCommand}" />
+        <KeyBinding Gesture="F5" Command="{Binding QuickSyncCommand}" />
+        <KeyBinding Gesture="Shift+F5" Command="{Binding FullSyncCommand}" />
+    </Window.KeyBindings>
+
+    <Window.Styles>
+        <Style Selector="Border.column">
+            <Setter Property="Width" Value="230" />
+            <Setter Property="BorderThickness" Value="0,0,1,0" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+        </Style>
+        <Style Selector="TextBlock.hint">
+            <Setter Property="Opacity" Value="0.7" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style Selector="TextBlock.step">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+        <Style Selector="Button.heart">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+    </Window.Styles>
+
+    <Panel>
+        <!--
+            First run: the app needs a Client ID from the user's own dashboard app.
+
+            The panel is top-aligned rather than vertically centred, and scrolls: centring measured
+            against an unconstrained height and clipped the note off the bottom on a short window.
+            The star columns keep it horizontally centred whatever the window width.
+        -->
+        <Border IsVisible="{Binding IsNeedsClientId}">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <Grid ColumnDefinitions="*,Auto,*">
+                    <StackPanel Grid.Column="1" Width="560" Margin="0,32,0,40" Spacing="18">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Connect your Spotify app" FontSize="22" FontWeight="SemiBold" />
+                        <TextBlock Classes="hint"
+                                   Text="Spotify requires each person to register their own app. It takes about a minute." />
+                    </StackPanel>
+
+                    <!-- Step 1 -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="step" Text="1 · Create an app" />
+                        <TextBlock Classes="hint" Text="Any name and description will do." />
+                        <TextBlock Classes="hint">
+                            <Run Text="Under" />
+                            <Run Text="“Which API/SDKs are you planning to use?”" FontStyle="Italic" />
+                            <Run Text="tick" />
+                            <Run Text="Web API" FontWeight="Bold" />
+                            <Run Text="and nothing else." />
+                        </TextBlock>
+                        <TextBlock Classes="hint"
+                                   Text="Leave Web Playback SDK unticked: it's browser-only, and this app plays through Spotify Connect instead. Android, iOS and Ads API aren't used either." />
+                        <HyperlinkButton Content="Open the Spotify Developer Dashboard →"
+                                         NavigateUri="{Binding DashboardUrl}"
+                                         HorizontalAlignment="Left" Padding="0" />
+                    </StackPanel>
+
+                    <!-- Step 2 -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="step" Text="2 · Add this redirect URI" />
+                        <TextBlock Classes="hint"
+                                   Text="Copy it exactly. Spotify won't accept localhost here, so keep the numeric address." />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Margin="6,0,0,0" Name="CopyRedirectButton"
+                                    Content="Copy" Click="OnCopyRedirectUri" />
+                            <TextBox Text="{Binding RedirectUri}" IsReadOnly="True" FontFamily="Consolas,monospace" />
+                        </DockPanel>
+                        <TextBlock Classes="hint" Foreground="{DynamicResource SystemAccentColor}"
+                                   IsVisible="{Binding RedirectUriCopied}" Text="Copied to clipboard." />
+                    </StackPanel>
+
+                    <!-- Step 3 -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="step" Text="3 · Paste the Client ID" />
+                        <TextBlock Classes="hint"
+                                   Text="On the app's settings page. The Client Secret isn't needed - this app signs in with PKCE." />
+                        <TextBox Text="{Binding ClientIdInput}" PlaceholderText="32 letters and digits"
+                                 FontFamily="Consolas,monospace" />
+                        <TextBlock Classes="hint" IsVisible="{Binding ClientIdError, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                   Foreground="#D13438" Text="{Binding ClientIdError}" />
+                    </StackPanel>
+
+                    <Button Content="Continue" Classes="accent" Command="{Binding SaveClientIdCommand}"
+                            HorizontalAlignment="Left" />
+
+                    <Border Padding="10" CornerRadius="4"
+                            Background="{DynamicResource SystemControlBackgroundListLowBrush}">
+                        <TextBlock Classes="hint"
+                                   Text="Note: Spotify requires the owner of a development-mode app to have an active Premium subscription, and controlling playback needs Premium too. Without it, browsing still works and playing hands off to the Spotify desktop app." />
+                    </Border>
+                </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Border>
+
+        <Border IsVisible="{Binding IsSignedOut}" Padding="40">
+            <StackPanel MaxWidth="480" VerticalAlignment="Center" Spacing="12">
+                <TextBlock Text="Sign in to Spotify" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Classes="hint" Text="{Binding Status}" />
+                <Button Content="Sign in" Command="{Binding SignInCommand}"
+                        IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Left" />
+            </StackPanel>
+        </Border>
+
+        <Grid IsVisible="{Binding IsReady}" RowDefinitions="Auto,Auto,4,*,Auto,Auto">
+
+            <!-- Toolbar -->
+            <DockPanel Grid.Row="0" Margin="8" LastChildFill="False">
+                <Button DockPanel.Dock="Left" Content="Quick sync"
+                        Command="{Binding QuickSyncCommand}" IsEnabled="{Binding !IsBusy}" />
+                <Button DockPanel.Dock="Left" Margin="6,0,0,0" Content="Full rebuild"
+                        Command="{Binding FullSyncCommand}" IsEnabled="{Binding !IsBusy}" />
+
+                <CheckBox DockPanel.Dock="Left" Margin="16,0,0,0" Content="Liked only"
+                          IsChecked="{Binding LikedOnly}" />
+
+                <CheckBox DockPanel.Dock="Left" Margin="12,0,0,0" Content="Saved albums only"
+                          IsChecked="{Binding SavedAlbumsOnly}"
+                          ToolTip.Tip="Restrict every column and the track list to albums in your library. Turn off to see liked songs and playlist tracks whose albums you haven't saved." />
+
+                <TextBox DockPanel.Dock="Left" Margin="16,0,0,0" Width="220"
+                         Text="{Binding Search}" PlaceholderText="Search library" />
+
+                <ComboBox DockPanel.Dock="Right" Width="180" ItemsSource="{Binding Devices}"
+                          SelectedItem="{Binding SelectedDevice}"
+                          PlaceholderText="No Connect device">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:DeviceRow">
+                            <TextBlock Text="{Binding Label}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <Button DockPanel.Dock="Right" Margin="0,0,6,0" Content="Play all"
+                        Command="{Binding PlayAllCommand}" />
+            </DockPanel>
+
+            <!-- Column browser -->
+            <Border Grid.Row="1" Height="300" BorderThickness="0,1,0,1"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Margin="6" Spacing="4" VerticalAlignment="Top">
+                        <Button Content="+" ToolTip.Tip="Add column" Width="30"
+                                Command="{Binding AddColumnCommand}" />
+                        <Button Content="−" ToolTip.Tip="Remove column" Width="30"
+                                Command="{Binding RemoveColumnCommand}" />
+                    </StackPanel>
+
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <ItemsControl Name="ColumnsHost" ItemsSource="{Binding Columns}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ColumnViewModel">
+                                    <Border Classes="column">
+                                        <DockPanel>
+                                            <ComboBox DockPanel.Dock="Top" Margin="4" HorizontalAlignment="Stretch"
+                                                      ItemsSource="{Binding AvailableCriteria}"
+                                                      SelectedItem="{Binding Criterion}">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="browsing:CriterionDescriptor">
+                                                        <TextBlock Text="{Binding DisplayName}" />
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+
+                                            <ListBox ItemsSource="{Binding Values}" SelectionMode="Multiple">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="browsing:BrowseValue">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Opacity="0.5"
+                                                                       Margin="8,0,0,0"
+                                                                       Text="{Binding TrackCount}" />
+                                                            <TextBlock Text="{Binding Display}"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                        </DockPanel>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Row="2" Height="4" HorizontalAlignment="Stretch"
+                          ResizeDirection="Rows" Background="Transparent" />
+
+            <!-- Track list -->
+            <TableView Grid.Row="3" Name="TrackTable" ItemsSource="{Binding Tracks}"
+                       SelectionMode="Multiple">
+                <TableView.Columns>
+                    <TableViewColumn Header="" Width="36">
+                        <TableViewColumn.CellTemplate>
+                            <DataTemplate x:DataType="vm:TrackViewModel">
+                                <Button Classes="heart"
+                                        Content="{Binding IsLiked, Converter={x:Static vm:HeartConverter.Instance}}"
+                                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ToggleLikeCommand}"
+                                        CommandParameter="{Binding}" />
+                            </DataTemplate>
+                        </TableViewColumn.CellTemplate>
+                    </TableViewColumn>
+                    <TableViewColumn Header="#" Binding="{Binding TrackNumber}" Width="44" />
+                    <TableViewColumn Header="Title" Binding="{Binding Name}" Width="3*" />
+                    <TableViewColumn Header="Artist" Binding="{Binding ArtistNames}" Width="2*" />
+                    <TableViewColumn Header="Album" Binding="{Binding AlbumName}" Width="2*" />
+                    <TableViewColumn Header="Year" Binding="{Binding Year}" Width="60" />
+                    <TableViewColumn Header="Time" Binding="{Binding Duration}" Width="60" />
+                </TableView.Columns>
+
+                <TableView.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Play"
+                                  Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).PlayTrackCommand}"
+                                  CommandParameter="{Binding #TrackTable.SelectedItem}" />
+                        <Separator />
+                        <MenuItem Header="Add to Liked Songs"
+                                  Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).LikeSelectionCommand}" />
+                        <MenuItem Header="Remove from Liked Songs"
+                                  Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).UnlikeSelectionCommand}" />
+                    </ContextMenu>
+                </TableView.ContextMenu>
+            </TableView>
+
+            <!-- Undo bar, shown only after an unlike -->
+            <Border Grid.Row="4" IsVisible="{Binding CanUndo}" Padding="8"
+                    Background="{DynamicResource SystemControlBackgroundListLowBrush}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Undo" Command="{Binding UndoLikeCommand}" />
+                    <TextBlock VerticalAlignment="Center" Text="{Binding UndoMessage}" />
+                </DockPanel>
+            </Border>
+
+            <!-- Status and now playing -->
+            <Border Grid.Row="5" Padding="8,6" BorderThickness="0,1,0,0"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Opacity="0.8" Text="{Binding NowPlaying}" />
+                    <TextBlock DockPanel.Dock="Left" Margin="0,0,12,0" Opacity="0.6"
+                               Text="{Binding TrackCount, StringFormat='{}{0} tracks'}" />
+                    <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Panel>
+</Window>
