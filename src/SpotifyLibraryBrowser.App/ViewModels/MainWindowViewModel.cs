@@ -336,12 +336,33 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var ids = _lastLikeChange.ToList();
         var restore = !_lastLikeWasLiking;
 
-        ClearUndo();
+        // Restore the whole set by ID rather than whatever happens to be on screen: an unlike
+        // with the liked filter on removes those very rows from the list, so filtering by the
+        // visible tracks would restore nothing while still claiming success.
+        var visible = Tracks.Where(t => ids.Contains(t.Id)).ToList();
 
-        var affected = Tracks.Where(t => ids.Contains(t.Id)).ToList();
-        await ApplyLikeAsync(affected, restore, recordUndo: false);
+        foreach (var track in visible)
+        {
+            track.IsLiked = restore;
+        }
 
-        Status = $"Restored {ids.Count} track{(ids.Count == 1 ? "" : "s")}.";
+        try
+        {
+            await _likes.SetLikedAsync(ids, restore);
+
+            // Only forget the undo once it's actually been applied, so a failure can be retried.
+            ClearUndo();
+            Status = $"Restored {ids.Count} track{(ids.Count == 1 ? "" : "s")}.";
+        }
+        catch (Exception e)
+        {
+            foreach (var track in visible)
+            {
+                track.IsLiked = !restore;
+            }
+
+            Status = $"Couldn't undo: {e.Message}";
+        }
     }
 
     /// <summary>Refreshes the browser from a given column rightwards.</summary>

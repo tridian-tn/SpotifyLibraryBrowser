@@ -9,7 +9,10 @@ namespace SpotifyLibraryBrowser.Core.Data;
 /// <param name="Tracks">Tracks held</param>
 /// <param name="LikedTracks">Tracks currently in Liked Songs</param>
 /// <param name="Playlists">Playlists held</param>
-/// <param name="ReadablePlaylists">Playlists whose contents Spotify let us read</param>
+/// <param name="ReadablePlaylists">
+/// Playlists whose contents Spotify let us read. Counted from the stored snapshot rather than
+/// from stored entries, since a readable playlist that happens to be empty is still readable
+/// </param>
 /// <param name="PlaylistTracks">Playlist entries stored</param>
 /// <param name="FollowedArtists">Artists the user follows</param>
 public sealed record LibraryCounts(
@@ -187,7 +190,7 @@ public sealed class LibraryRepository(LibraryDatabase database)
                    (SELECT COUNT(*) FROM tracks),
                    (SELECT COUNT(*) FROM tracks WHERE is_liked = 1),
                    (SELECT COUNT(*) FROM playlists),
-                   (SELECT COUNT(DISTINCT playlist_id) FROM playlist_tracks),
+                   (SELECT COUNT(*) FROM playlists WHERE snapshot_id <> ''),
                    (SELECT COUNT(*) FROM playlist_tracks),
                    (SELECT COUNT(*) FROM followed_artists);
             """;

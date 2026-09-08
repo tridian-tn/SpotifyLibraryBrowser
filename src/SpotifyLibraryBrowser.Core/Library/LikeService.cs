@@ -76,13 +76,16 @@ public sealed class LikeService(
     /// </remarks>
     /// <param name="trackIds">The tracks to check, ideally no more than one request's worth</param>
     /// <param name="cancel">Cancels the check</param>
-    /// <returns>The tracks whose liked state was actually wrong, and their correct state</returns>
+    /// <returns>
+    /// Spotify's liked state for every track checked, not only the ones that had drifted. Callers
+    /// apply the lot rather than having to work out which rows changed
+    /// </returns>
     public async Task<IReadOnlyDictionary<string, bool>> ReconcileAsync(
         IReadOnlyList<string> trackIds,
         CancellationToken cancel = default)
     {
-        var corrections = new Dictionary<string, bool>();
-        if (trackIds.Count == 0) return corrections;
+        var states = new Dictionary<string, bool>();
+        if (trackIds.Count == 0) return states;
 
         var actual = new Dictionary<string, bool>();
 
@@ -111,10 +114,10 @@ public sealed class LikeService(
 
         foreach (var (id, isLiked) in actual)
         {
-            corrections[id] = isLiked;
+            states[id] = isLiked;
         }
 
-        return corrections;
+        return states;
     }
 
     /// <summary>Splits an ID set into request-sized chunks.</summary>

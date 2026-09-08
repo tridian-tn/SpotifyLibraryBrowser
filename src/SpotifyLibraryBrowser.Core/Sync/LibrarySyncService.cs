@@ -305,6 +305,7 @@ public sealed class LibrarySyncService(
         var served = 0;
         var refused = 0;
         var skipped = 0;
+        var notOwned = 0;
         var stored = 0;
         string? firstRefusal = null;
         int? total = null;
@@ -349,6 +350,13 @@ public sealed class LibrarySyncService(
                 {
                     skipped++;
                 }
+                else if (!owned)
+                {
+                    // Only owned and collaborative playlists have readable contents, so the rest
+                    // are recorded by name and left alone. Asking anyway would spend a refused
+                    // request per playlist on every rebuild for an answer already known.
+                    notOwned++;
+                }
                 else
                 {
                     var result = await TryReadPlaylistItemsAsync(reference.Id, cancel)
@@ -390,8 +398,9 @@ public sealed class LibrarySyncService(
         // Say what happened, so "no playlists" can be told apart from "every read was refused"
         // and from "they were read but held nothing we can store".
         var detail = refused > 0
-            ? $"{served} read, {skipped} unchanged, {refused} refused. First refusal: {firstRefusal}"
-            : $"{served} read ({stored} entries), {skipped} unchanged";
+            ? $"{served} read ({stored} entries), {skipped} unchanged, {notOwned} not owned, " +
+              $"{refused} refused. First refusal: {firstRefusal}"
+            : $"{served} read ({stored} entries), {skipped} unchanged, {notOwned} not owned";
 
         progress?.Report(new SyncProgress("Playlists", done, total, detail));
         await repository.SetSyncStateAsync("playlists_detail", detail, cancel).ConfigureAwait(false);

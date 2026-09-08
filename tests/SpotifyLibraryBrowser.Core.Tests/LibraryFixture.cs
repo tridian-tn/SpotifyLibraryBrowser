@@ -107,6 +107,11 @@ public sealed class LibraryFixture : IAsyncDisposable
         await writer.AddPlaylistTrackAsync(playlist.Id, "tr-warsaw", 1, null);
         await writer.AddPlaylistTrackAsync(playlist.Id, "tr-roygbiv", 2, null);
 
+        // A playlist Spotify served that simply has nothing in it, and one whose read was refused
+        // (recorded by the sync as an empty snapshot). Only the first counts as readable.
+        await writer.UpsertPlaylistAsync(new PlaylistRef("pl-empty", "Nothing Here", "user-1", "snap-2", true));
+        await writer.UpsertPlaylistAsync(new PlaylistRef("pl-refused", "Someone Else's", "other", string.Empty, false));
+
         await writer.AddFollowedArtistAsync(Miles.Id);
 
         await writer.CommitAsync();
