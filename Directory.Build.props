@@ -1,0 +1,12 @@
+<Project>
+
+  <!--
+    One place the version lives, so the assembly, the artefact filenames and the release tag can't
+    drift apart. The packaging script reads it from here when no -Version is passed, and CI passes
+    the tag through when a release is cut from one.
+  -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+</Project>
