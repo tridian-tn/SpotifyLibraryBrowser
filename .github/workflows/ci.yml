@@ -3,57 +3,164 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build-and-test:
-    name: Build and test (Windows)
+  build-test:
+    name: build & test
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
 
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
       - name: Restore
         run: dotnet restore SpotifyLibraryBrowser.slnx
 
-      # Warnings are failures here. The app is built on the rule that nothing deprecated gets
-      # used, and an obsolete-API warning is exactly how that rule breaks quietly.
+      # Warnings are failures. The app is built on the rule that nothing deprecated gets used, and
+      # an obsolete-API warning is exactly how that rule breaks quietly.
       - name: Build
-        run: dotnet build SpotifyLibraryBrowser.slnx --configuration Release --no-restore -warnaserror
+        run: dotnet build SpotifyLibraryBrowser.slnx -c Release --no-restore -warnaserror
 
       - name: Test
-        run: dotnet test SpotifyLibraryBrowser.slnx --configuration Release --no-build
-
-      # Publishing exercises code paths a test run doesn't: `dotnet test` only builds the projects
-      # the tests reference, so a compile error in the UI can otherwise reach a green run.
-      - name: Publish
-        run: >
-          dotnet publish src/SpotifyLibraryBrowser.App
-          --configuration Release
-          --runtime win-x64
-          --self-contained false
-          --output publish/win-x64
+        run: dotnet test SpotifyLibraryBrowser.slnx -c Release --no-build
 
   core-is-portable:
-    name: Core builds and tests (Linux)
+    name: core builds & tests on Linux
     runs-on: ubuntu-latest
 
+    # Core carries all the logic and is meant to be UI-free and platform-agnostic. Building and
+    # testing it away from Windows is what keeps that true rather than merely intended.
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
 
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
-      # Core carries all the logic and is meant to be UI-free and platform-agnostic. Building and
-      # testing it away from Windows is what keeps that true, rather than merely intended.
       - name: Test Core
-        run: dotnet test tests/SpotifyLibraryBrowser.Core.Tests --configuration Release
+        run: dotnet test tests/SpotifyLibraryBrowser.Core.Tests -c Release
+
+  package:
+    name: package
+    runs-on: windows-latest
+    needs: build-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # -SkipTests because the job above has just run the suite, and running it twice adds minutes
+      # for nothing.
+      #
+      # -Version is taken from the tag when there is one and left off otherwise, so a tag push names
+      # the artefacts and stamps the assembly with the tag rather than with the props. On a branch
+      # or a PR the props are the source, which is also what makes this job worth running there:
+      # packaging that only ever runs on a tag is packaging you find out about on a tag.
+      - name: Build the artefacts
+        shell: pwsh
+        run: |
+          # Read from the environment rather than templated into the script — a tag name that git
+          # accepts can contain a single quote, and interpolating it into '' would break parsing.
+          # Not $args either, which is the automatic PowerShell name for a function's arguments.
+          $buildArgs = @('-SkipTests')
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME.StartsWith('v')) {
+            $buildArgs += @('-Version', $env:GITHUB_REF_NAME.TrimStart('v'))
+          }
+          pwsh -File ./packaging/build.ps1 @buildArgs
+
+      # Named rather than globbed at the directory, so the publish folder underneath doesn't come
+      # too — that is the unpackaged app, and it is what both zips are made of.
+      - name: Keep them
+        uses: actions/upload-artifact@v7
+        with:
+          name: spotify-library-browser-artefacts
+          if-no-files-found: error
+          path: |
+            artifacts/*.zip
+            artifacts/SHA256SUMS.txt
+
+  release:
+    name: release
+    runs-on: windows-latest
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    # Only this job, and only on a tag. The packaging above runs on every pull request, including
+    # ones from forks, and has no business being able to write to the repository.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Take the artefacts the packaging job built
+        uses: actions/download-artifact@v8
+        with:
+          name: spotify-library-browser-artefacts
+          path: artifacts
+
+      # The packaging job stamps both filenames and the assembly with the tag, so the tag and the
+      # artefacts agree by construction. This is here to catch that packaging didn't drop one of
+      # them silently — half a release, downloaded by whoever clicked the link first, is worse than
+      # one that stops here.
+      - name: Check both artefacts are here
+        shell: pwsh
+        run: |
+          # Off the environment, not templated into the script — same reasoning as the packaging job.
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $missing = @('portable', 'self-contained') |
+            ForEach-Object { Join-Path 'artifacts' "SpotifyLibraryBrowser-$version-win-x64-$_.zip" } |
+            Where-Object { -not (Test-Path $_) }
+
+          if ($missing) {
+            $built = (Get-ChildItem artifacts | ForEach-Object Name) -join ', '
+            throw "Expected $($missing -join ', '), got: $built"
+          }
+
+      # Drafted rather than published: these are unsigned, so somebody should look before they are
+      # downloadable. Delete the draft to abandon a release, or press the button to make it real. A
+      # release that already exists for this tag is attached to as it stands.
+      - name: Attach them to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+          # Which repository, told rather than worked out. gh otherwise asks git, and this job has
+          # no checkout to ask — only the artefacts the packaging job built. Without this every one
+          # of the commands below fails with "not a git repository", on a tag, which is the worst
+          # place to find it.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Off the environment, not templated into the script — same reasoning as above.
+          $tag = $env:GITHUB_REF_NAME
+
+          # gh exits non-zero when there's no release yet, which is the ordinary case here rather
+          # than a failure. Whether a non-zero native command becomes a terminating error under this
+          # shell's ErrorActionPreference has changed between PowerShell versions, so the answer is
+          # taken from what gh printed instead of from how it exited — that reads the same either
+          # way. Anything else going wrong leaves this empty too, and the create below then fails
+          # loudly, which is the right end for it.
+          $existing = $null
+          try { $existing = gh release view $tag --json tagName 2>$null } catch { }
+
+          if (-not $existing) {
+            gh release create $tag --draft --title "Spotify Library Browser $tag" --generate-notes
+          }
+
+          gh release upload $tag (Get-ChildItem artifacts/*.zip, artifacts/SHA256SUMS.txt) --clobber
