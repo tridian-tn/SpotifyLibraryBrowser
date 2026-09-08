@@ -1,0 +1,54 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!--
+      Desktop-appropriate GC: workstation rather than server, and no background collector thread.
+      Measured against the defaults this made no difference to the footprint — that's dominated by
+      Skia's GPU surfaces and the runtime baseline — but it's the right shape for a desktop app.
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <!--
+    Skia and HarfBuzz ship native .pdb files that are far larger than the libraries themselves —
+    over 100 MB of debug symbols nobody running the app needs. Embedding our own symbols and
+    dropping reference-related files keeps a publish to roughly its actual size.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>embedded</DebugType>
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.2" />
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SpotifyLibraryBrowser.Core\SpotifyLibraryBrowser.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    The native symbols arrive as runtime assets, which the property above doesn't reach, so they
+    get dropped from the publish list itself. Release builds embed our own symbols in the assembly,
+    so nothing useful is lost.
+  -->
+  <Target Name="RemovePdbsFromPublish" AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(Configuration)' == 'Release'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+</Project>

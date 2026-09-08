@@ -1,0 +1,202 @@
+using System.Diagnostics;
+using SpotifyAPI.Web;
+using SpotifyLibraryBrowser.Core.Api;
+
+namespace SpotifyLibraryBrowser.Core.Playback;
+
+/// <summary>What happened when playback was requested.</summary>
+public enum PlaybackOutcome
+{
+    /// <summary>Spotify accepted it and is playing on a Connect device.</summary>
+    Started = 0,
+
+    /// <summary>No device was available, so the request was handed to the desktop client.</summary>
+    HandedOff = 1,
+
+    /// <summary>Neither route worked.</summary>
+    Failed = 2
+}
+
+/// <summary>
+/// Drives playback on whatever Spotify client is already running.
+/// </summary>
+/// <remarks>
+/// A native app can't be a playback device itself — the Web Playback SDK is browser-only — so
+/// this is a Connect remote. When there's no live device, or the account turns out not to be
+/// Premium, it falls back to handing the URI to the desktop client. That fallback is the only
+/// way to discover the entitlement now that the user object no longer exposes it.
+/// </remarks>
+/// <param name="player">The player endpoints, taken narrowly so this is testable with a stub</param>
+/// <param name="throttle">The shared rate gate</param>
+public sealed class PlaybackController(IPlayerClient player, RequestThrottle throttle)
+{
+    /// <summary>Lists the Connect devices available to play on.</summary>
+    /// <param name="cancel">Cancels the call</param>
+    /// <returns>The available devices, empty when none are live</returns>
+    public async Task<IReadOnlyList<Device>> GetDevicesAsync(CancellationToken cancel = default)
+    {
+        try
+        {
+            await throttle.WaitAsync(cancel).ConfigureAwait(false);
+            var response = await player.GetAvailableDevices(cancel).ConfigureAwait(false);
+            return response.Devices ?? [];
+        }
+        catch (APIException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>Reads what's playing right now, for the now-playing bar.</summary>
+    /// <param name="cancel">Cancels the call</param>
+    /// <returns>The current playback state, or null when nothing is playing</returns>
+    public async Task<CurrentlyPlayingContext?> GetCurrentAsync(CancellationToken cancel = default)
+    {
+        try
+        {
+            await throttle.WaitAsync(cancel).ConfigureAwait(false);
+            return await player.GetCurrentPlayback(cancel).ConfigureAwait(false);
+        }
+        catch (APIException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Plays an album or playlist, optionally starting partway in.
+    /// </summary>
+    /// <param name="contextUri">The album or playlist URI to play</param>
+    /// <param name="offsetPosition">Zero-based index to start at within that context</param>
+    /// <param name="deviceId">The device to play on, or null for the active one</param>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>Whether playback started, was handed off, or failed</returns>
+    public async Task<PlaybackOutcome> PlayContextAsync(
+        string contextUri,
+        int? offsetPosition = null,
+        string? deviceId = null,
+        CancellationToken cancel = default)
+    {
+        var request = new PlayerResumePlaybackRequest { ContextUri = contextUri };
+
+        if (offsetPosition is { } position)
+        {
+            request.OffsetParam = new PlayerResumePlaybackRequest.Offset { Position = position };
+        }
+
+        return await ResumeAsync(request, contextUri, deviceId, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Plays an explicit list of tracks, which is how a column selection gets played.
+    /// </summary>
+    /// <param name="trackUris">The track URIs to play, in order</param>
+    /// <param name="deviceId">The device to play on, or null for the active one</param>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>Whether playback started, was handed off, or failed</returns>
+    public async Task<PlaybackOutcome> PlayTracksAsync(
+        IReadOnlyList<string> trackUris,
+        string? deviceId = null,
+        CancellationToken cancel = default)
+    {
+        if (trackUris.Count == 0) return PlaybackOutcome.Failed;
+
+        var request = new PlayerResumePlaybackRequest { Uris = trackUris.ToList() };
+        return await ResumeAsync(request, trackUris[0], deviceId, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>Pauses playback.</summary>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>Whether the request was accepted</returns>
+    public Task<bool> PauseAsync(CancellationToken cancel = default) =>
+        TryAsync(() => player.PausePlayback(cancel));
+
+    /// <summary>Resumes playback without changing what's queued.</summary>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>Whether the request was accepted</returns>
+    public Task<bool> ResumeAsync(CancellationToken cancel = default) =>
+        TryAsync(() => player.ResumePlayback(cancel));
+
+    /// <summary>Skips to the next track.</summary>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>Whether the request was accepted</returns>
+    public Task<bool> NextAsync(CancellationToken cancel = default) =>
+        TryAsync(() => player.SkipNext(cancel));
+
+    /// <summary>Skips to the previous track.</summary>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>Whether the request was accepted</returns>
+    public Task<bool> PreviousAsync(CancellationToken cancel = default) =>
+        TryAsync(() => player.SkipPrevious(cancel));
+
+    /// <summary>Moves playback to another Connect device.</summary>
+    /// <param name="deviceId">The device to transfer to</param>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>Whether the request was accepted</returns>
+    public Task<bool> TransferAsync(string deviceId, CancellationToken cancel = default) =>
+        TryAsync(() => player.TransferPlayback(new PlayerTransferPlaybackRequest([deviceId])));
+
+    /// <summary>
+    /// Hands a URI to the installed Spotify client.
+    /// </summary>
+    /// <remarks>This is what runs when there's no Connect device to talk to.</remarks>
+    /// <param name="uri">The Spotify URI to open</param>
+    /// <returns>Whether the handover was launched</returns>
+    public static bool OpenInSpotify(string uri)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
+            return true;
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Sends a play request, falling back to the desktop client when Connect can't serve it.
+    /// </summary>
+    /// <param name="request">The prepared play request</param>
+    /// <param name="fallbackUri">The URI to hand off if Connect fails</param>
+    /// <param name="deviceId">The device to target, or null for the active one</param>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>Whether playback started, was handed off, or failed</returns>
+    private async Task<PlaybackOutcome> ResumeAsync(
+        PlayerResumePlaybackRequest request,
+        string fallbackUri,
+        string? deviceId,
+        CancellationToken cancel)
+    {
+        if (!string.IsNullOrEmpty(deviceId)) request.DeviceId = deviceId;
+
+        try
+        {
+            await throttle.WaitAsync(cancel).ConfigureAwait(false);
+            await player.ResumePlayback(request, cancel).ConfigureAwait(false);
+            return PlaybackOutcome.Started;
+        }
+        catch (APIException)
+        {
+            // No active device, or the account isn't Premium — either way the desktop client can
+            // still take it.
+            return OpenInSpotify(fallbackUri) ? PlaybackOutcome.HandedOff : PlaybackOutcome.Failed;
+        }
+    }
+
+    /// <summary>Runs a transport command, treating an API refusal as a soft failure.</summary>
+    /// <param name="action">The command to run</param>
+    /// <returns>Whether the command was accepted</returns>
+    private static async Task<bool> TryAsync(Func<Task<bool>> action)
+    {
+        try
+        {
+            return await action().ConfigureAwait(false);
+        }
+        catch (APIException)
+        {
+            return false;
+        }
+    }
+}
