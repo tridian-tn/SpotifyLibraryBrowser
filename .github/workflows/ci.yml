@@ -160,7 +160,14 @@ jobs:
           try { $existing = gh release view $tag --json tagName 2>$null } catch { }
 
           if (-not $existing) {
-            gh release create $tag --draft --title "Spotify Library Browser $tag" --generate-notes
+            $create = @('--draft', '--title', "Spotify Library Browser $tag", '--generate-notes')
+
+            # A tag carrying a pre-release part is one, and GitHub uses the flag to decide what
+            # "latest release" means. Marking v1.2.3-rc.1 as a full release would eventually put a
+            # release candidate in front of everyone arriving at the repository.
+            if ($tag -match '-') { $create += '--prerelease' }
+
+            gh release create $tag @create
           }
 
           gh release upload $tag (Get-ChildItem artifacts/*.zip, artifacts/SHA256SUMS.txt) --clobber
