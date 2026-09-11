@@ -62,6 +62,11 @@ public partial class MainWindow : Window
 
         Width = _model.SavedWidth;
         Height = _model.SavedHeight;
+
+        // The browser row is what the splitter moves, so its height is the thing worth restoring.
+        // Guarded against a stored value taller than the window, which would leave no track list.
+        var browser = Math.Clamp(_model.SavedBrowserHeight, 120, Math.Max(120, Height - 260));
+        BrowserGrid.RowDefinitions[1].Height = new GridLength(browser, GridUnitType.Pixel);
     }
 
     /// <summary>Saves the layout on the way out.</summary>
@@ -69,7 +74,11 @@ public partial class MainWindow : Window
     /// <param name="e">The event data</param>
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        if (_model is not null) await _model.SaveLayoutAsync(Width, Height);
+        if (_model is null) return;
+
+        // The measured height, not the declared one: a splitter may leave a row star-sized, and
+        // Height.Value would then be a star factor rather than a number of pixels.
+        await _model.SaveLayoutAsync(Width, Height, BrowserGrid.RowDefinitions[1].ActualHeight);
     }
 
     /// <summary>
