@@ -30,6 +30,9 @@ public enum PlaybackOutcome
 /// <param name="throttle">The shared rate gate</param>
 public sealed class PlaybackController(IPlayerClient player, RequestThrottle throttle)
 {
+    /// <summary>How many tracks a single queue request will add before it stops.</summary>
+    public const int MaxQueued = 50;
+
     /// <summary>Lists the Connect devices available to play on.</summary>
     /// <param name="cancel">Cancels the call</param>
     /// <returns>The available devices, empty when none are live</returns>
@@ -103,6 +106,47 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
 
         var request = new PlayerResumePlaybackRequest { Uris = trackUris.ToList() };
         return await ResumeAsync(request, trackUris[0], deviceId, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Adds tracks to the end of the play queue.
+    /// </summary>
+    /// <remarks>
+    /// Spotify queues one URI per request, so a big selection is a lot of requests. This stops at
+    /// <see cref="MaxQueued"/> rather than spending a rate-limit window queueing an entire
+    /// discography, and tells the caller how many made it.
+    /// </remarks>
+    /// <param name="trackUris">The tracks to queue, in order</param>
+    /// <param name="deviceId">The device to queue on, or null for the active one</param>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>How many tracks were queued</returns>
+    public async Task<int> QueueAsync(
+        IReadOnlyList<string> trackUris,
+        string? deviceId = null,
+        CancellationToken cancel = default)
+    {
+        var queued = 0;
+
+        foreach (var uri in trackUris.Take(MaxQueued))
+        {
+            var request = new PlayerAddToQueueRequest(uri);
+            if (!string.IsNullOrEmpty(deviceId)) request.DeviceId = deviceId;
+
+            try
+            {
+                await throttle.WaitAsync(cancel).ConfigureAwait(false);
+                await player.AddToQueue(request, cancel).ConfigureAwait(false);
+                queued++;
+            }
+            catch (APIException)
+            {
+                // No active device, or the account isn't Premium. Stop rather than spend the rest
+                // of the selection discovering the same thing once per track.
+                break;
+            }
+        }
+
+        return queued;
     }
 
     /// <summary>Pauses playback.</summary>

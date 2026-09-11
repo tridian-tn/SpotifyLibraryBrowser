@@ -13,6 +13,7 @@
         <KeyBinding Gesture="Ctrl+L" Command="{Binding LikeSelectionCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+L" Command="{Binding UnlikeSelectionCommand}" />
         <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoLikeCommand}" />
+        <KeyBinding Gesture="Ctrl+Q" Command="{Binding QueueSelectionCommand}" />
         <KeyBinding Gesture="F5" Command="{Binding QuickSyncCommand}" />
         <KeyBinding Gesture="Shift+F5" Command="{Binding FullSyncCommand}" />
     </Window.KeyBindings>
@@ -239,11 +240,20 @@
                         <MenuItem Header="Play"
                                   Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).PlayTrackCommand}"
                                   CommandParameter="{Binding #TrackTable.SelectedItem}" />
+                        <MenuItem Header="Add to queue" InputGesture="Ctrl+Q"
+                                  IsEnabled="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).HasSelection}"
+                                  Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).QueueSelectionCommand}" />
                         <Separator />
                         <MenuItem Header="Add to Liked Songs"
                                   Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).LikeSelectionCommand}" />
                         <MenuItem Header="Remove from Liked Songs"
                                   Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).UnlikeSelectionCommand}" />
+                        <Separator />
+                        <!-- One item, whichever way round the selection is: an album already in the
+                             library offers removal, one that isn't offers saving. -->
+                        <MenuItem Header="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).AlbumActionText}"
+                                  IsEnabled="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).HasSelection}"
+                                  Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ToggleSelectedAlbumsSavedCommand}" />
                     </ContextMenu>
                 </TableView.ContextMenu>
             </TableView>

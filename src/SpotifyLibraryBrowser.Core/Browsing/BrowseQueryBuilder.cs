@@ -9,6 +9,11 @@ namespace SpotifyLibraryBrowser.Core.Browsing;
 public sealed record BrowseValue(string Key, string Display, int TrackCount);
 
 /// <summary>A track as shown in the track list, flattened for display.</summary>
+/// <remarks>
+/// <c>AlbumIsSaved</c> rides along so the track list can offer the right verb for the album
+/// without a second query: an album already in the library is one to remove, and one that only
+/// turned up because a track on it was liked is one to save.
+/// </remarks>
 public sealed record TrackRow(
     string Id,
     string Uri,
@@ -21,7 +26,8 @@ public sealed record TrackRow(
     int TrackNumber,
     int DurationMs,
     bool Explicit,
-    bool IsLiked);
+    bool IsLiked,
+    bool AlbumIsSaved);
 
 /// <summary>The criterion a column groups by, plus whatever the user has selected in it.</summary>
 /// <param name="Criterion">What this column groups by</param>
@@ -107,7 +113,7 @@ public static class BrowseQueryBuilder
         // ordering on its own, and credit order matters on collaborations.
         sql.Append("SELECT DISTINCT t.id, t.uri, t.name, t.disc_number, t.track_number, ")
            .Append("t.duration_ms, t.explicit, t.is_liked, al.id AS album_id, al.name AS album_name, ")
-           .Append("substr(al.release_date, 1, 4) AS year, ")
+           .Append("al.is_saved AS album_is_saved, substr(al.release_date, 1, 4) AS year, ")
            .Append("(SELECT group_concat(n, ', ') FROM (")
            .Append("SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.id = ta2.artist_id ")
            .Append("WHERE ta2.track_id = t.id ORDER BY ta2.position)) AS artist_names ")

@@ -133,6 +133,49 @@ public sealed class LibraryRepository(LibraryDatabase database)
     }
 
     /// <summary>
+    /// Marks albums as being in the library or not, which is what the save and remove actions
+    /// write locally before and after calling the API.
+    /// </summary>
+    /// <remarks>
+    /// Removing only clears the flag; the album row stays because liked songs and playlist
+    /// entries may still point at it. A full rebuild is what eventually prunes it.
+    /// </remarks>
+    /// <param name="albumIds">The albums to change</param>
+    /// <param name="saved">Whether they should count as being in the library</param>
+    /// <param name="cancel">Cancels the write</param>
+    /// <returns>How many rows changed</returns>
+    public async Task<int> SetAlbumsSavedAsync(
+        IReadOnlyCollection<string> albumIds,
+        bool saved,
+        CancellationToken cancel = default)
+    {
+        if (albumIds.Count == 0) return 0;
+
+        await using var connection = await database.ConnectAsync(cancel).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancel).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "UPDATE albums SET is_saved = @saved, added_at = @at WHERE id = @id;";
+
+        var changed = 0;
+
+        foreach (var id in albumIds)
+        {
+            command.Parameters.Clear();
+            command.Parameters.AddWithValue("@saved", saved ? 1 : 0);
+            command.Parameters.AddWithValue("@at", saved ? DateTimeOffset.UtcNow.ToString("O") : (object)DBNull.Value);
+            command.Parameters.AddWithValue("@id", id);
+
+            changed += await command.ExecuteNonQueryAsync(cancel).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancel).ConfigureAwait(false);
+        return changed;
+    }
+
+    /// <summary>
     /// Clears the state a full rebuild re-establishes, so removals actually disappear.
     /// </summary>
     /// <remarks>

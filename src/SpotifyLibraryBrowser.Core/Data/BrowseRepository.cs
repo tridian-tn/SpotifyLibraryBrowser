@@ -73,8 +73,9 @@ public sealed class BrowseRepository(LibraryDatabase database)
                 IsLiked: reader.GetBoolean(7),
                 AlbumId: reader.GetString(8),
                 AlbumName: reader.GetString(9),
-                Year: reader.IsDBNull(10) ? null : reader.GetString(10),
-                ArtistNames: reader.IsDBNull(11) ? string.Empty : reader.GetString(11)));
+                AlbumIsSaved: reader.GetBoolean(10),
+                Year: reader.IsDBNull(11) ? null : reader.GetString(11),
+                ArtistNames: reader.IsDBNull(12) ? string.Empty : reader.GetString(12)));
         }
 
         return tracks;
