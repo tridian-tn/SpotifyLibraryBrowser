@@ -71,6 +71,16 @@ public static class SettingsStore
 {
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
+    /// <summary>
+    /// Serialises writes, so two of them can't be in the file at once.
+    /// </summary>
+    /// <remarks>
+    /// Toggles write immediately and don't wait for each other, and closing the window writes too.
+    /// Left to race, one caller loses to a sharing violation and the preference it was saving
+    /// silently goes with it.
+    /// </remarks>
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+
     /// <summary>Reads the settings, falling back to defaults when there's nothing usable.</summary>
     /// <param name="cancel">Cancels the read</param>
     /// <returns>The stored settings, or fresh defaults</returns>
@@ -97,7 +107,26 @@ public static class SettingsStore
     {
         Directory.CreateDirectory(AppPaths.DataDirectory);
 
-        await using var stream = File.Create(AppPaths.SettingsFile);
-        await JsonSerializer.SerializeAsync(stream, settings, Options, cancel);
+        await Gate.WaitAsync(cancel).ConfigureAwait(false);
+
+        try
+        {
+            // Written beside the real file and moved over it, rather than truncating the real one
+            // and writing into it. A crash or a force-quit partway through the second leaves
+            // settings that won't parse; the move either happens or it doesn't.
+            var temporary = AppPaths.SettingsFile + ".tmp";
+
+            await using (var stream = File.Create(temporary))
+            {
+                await JsonSerializer.SerializeAsync(stream, settings, Options, cancel)
+                    .ConfigureAwait(false);
+            }
+
+            File.Move(temporary, AppPaths.SettingsFile, overwrite: true);
+        }
+        finally
+        {
+            Gate.Release();
+        }
     }
 }
