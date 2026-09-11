@@ -13,6 +13,7 @@ using SpotifyLibraryBrowser.Core.Api;
 using SpotifyLibraryBrowser.Core.Auth;
 using SpotifyLibraryBrowser.Core.Browsing;
 using SpotifyLibraryBrowser.Core.Data;
+using SpotifyLibraryBrowser.Core.Discography;
 using SpotifyLibraryBrowser.Core.Library;
 using SpotifyLibraryBrowser.Core.Playback;
 using SpotifyLibraryBrowser.Core.Sync;
@@ -45,6 +46,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private LibraryRepository? _repository;
     private BrowseRepository? _browse;
     private LibraryWriteService? _library;
+    private DiscographyRepository? _discographyStore;
     private PlaybackController? _playback;
     private LibrarySyncService? _sync;
     private PkceAuthService? _auth;
@@ -52,6 +54,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _refresh;
     private bool _lastLikeWasLiking;
     private bool _suppressRefresh;
+    private bool _showingDiscographyAlbum;
 
     [ObservableProperty]
     private AppState _state = AppState.Loading;
@@ -106,10 +109,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public MainWindowViewModel()
     {
         SelectedTracks.CollectionChanged += (_, _) => UpdateSelectionState();
+
+        // Saving from the panel changes what the Album and Album Artist columns browse.
+        Discography.LibraryChanged += () => _ = RefreshAllAsync();
+
+        // Picking a release in the panel takes the track list over until the browser moves on.
+        Discography.AlbumPicked += ShowDiscographyTracks;
     }
 
     /// <summary>The browser's columns, left to right.</summary>
     public ObservableCollection<ColumnViewModel> Columns { get; } = [];
+
+    /// <summary>The discography panel, shown when a single artist is selected.</summary>
+    public DiscographyPanelViewModel Discography { get; } = new();
 
     /// <summary>
     /// The tracks matching the current selection.
@@ -168,6 +180,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _database = await LibraryDatabase.OpenAsync(AppPaths.DatabaseFile);
         _repository = new LibraryRepository(_database);
         _browse = new BrowseRepository(_database);
+        _discographyStore = new DiscographyRepository(_database);
+
+        Discography.Restore(_settings.DiscographySort, _settings.DiscographyGroups);
 
         BuildColumns(_settings.Columns);
 
@@ -503,6 +518,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             }
 
             await RefreshTracksAsync(cts.Token);
+            UpdateDiscography();
         }
         catch (OperationCanceledException)
         {
@@ -541,6 +557,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             }
 
             await RefreshTracksAsync(cts.Token);
+            UpdateDiscography();
         }
         catch (OperationCanceledException)
         {
@@ -607,6 +624,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _settings.WindowHeight = height;
         _settings.LikedOnly = LikedOnly;
         _settings.SavedAlbumsOnly = SavedAlbumsOnly;
+        _settings.DiscographySort = Discography.Sort;
+        _settings.DiscographyGroups = Discography.Groups;
         _settings.Columns = Columns.Select(c => c.Criterion.Criterion).ToList();
 
         await SettingsStore.SaveAsync(_settings);
@@ -657,6 +676,69 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
             Status = $"Couldn't update Liked Songs: {e.Message}";
         }
+    }
+
+    /// <summary>
+    /// Points the discography panel at whichever artist is selected, or hides it.
+    /// </summary>
+    /// <remarks>
+    /// One artist, exactly: with several selected there's no single discography to show, and with
+    /// none there's nothing to ask about. Either way the panel gets out of the way rather than
+    /// showing something arbitrary.
+    /// </remarks>
+    private void UpdateDiscography()
+    {
+        var artist = Columns
+            .Where(c => c.Criterion.Criterion is ColumnCriterion.Artist or ColumnCriterion.AlbumArtist)
+            .Where(c => c.SelectedKeys.Count == 1)
+            .Select(c => c.Values.FirstOrDefault(v => v.Key == c.SelectedKeys[0]))
+            .FirstOrDefault(v => v is not null);
+
+        if (artist is null)
+        {
+            Discography.Hide();
+            return;
+        }
+
+        // Fire and forget: it reaches the network, and browsing shouldn't wait on it.
+        _ = Discography.ShowAsync(artist.Key, artist.Display);
+    }
+
+    /// <summary>
+    /// Shows a discography release's tracks in the main list.
+    /// </summary>
+    /// <remarks>
+    /// These rows come from Spotify rather than from a browse query, so the list stops reflecting
+    /// the columns for as long as they're up. Changing anything in the browser puts it back, and
+    /// the status line says what's showing meanwhile.
+    /// </remarks>
+    /// <param name="album">The release picked</param>
+    /// <param name="tracks">Its tracks, as fetched</param>
+    private void ShowDiscographyTracks(
+        DiscographyAlbumViewModel album,
+        IReadOnlyList<DiscographyTrack> tracks)
+    {
+        _showingDiscographyAlbum = true;
+
+        SelectedTracks.Clear();
+        Tracks = new ObservableCollection<TrackViewModel>(
+            tracks.Select(t => new TrackViewModel(new TrackRow(
+                Id: t.Id,
+                Uri: t.Uri,
+                Name: t.Name,
+                ArtistNames: t.ArtistNames,
+                AlbumId: t.AlbumId,
+                AlbumName: t.AlbumName,
+                Year: null,
+                DiscNumber: t.DiscNumber,
+                TrackNumber: t.TrackNumber,
+                DurationMs: t.DurationMs,
+                Explicit: t.Explicit,
+                IsLiked: t.IsLiked,
+                AlbumIsSaved: album.IsSaved))));
+
+        TrackCount = tracks.Count;
+        Status = $"Showing {album.Name} from Spotify. Change a column to go back to your library.";
     }
 
     /// <summary>Recomputes what the album action should offer for the current selection.</summary>
@@ -740,6 +822,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _sync = new LibrarySyncService(client, _repository!, _throttle);
         _library = new LibraryWriteService(client.Library, _repository!, _throttle);
         _playback = new PlaybackController(client.Player, _throttle);
+
+        Discography.Connect(
+            new DiscographyService(client.Artists, client.Albums, _discographyStore!, _throttle),
+            _library,
+            _playback,
+            client.Library);
 
         State = AppState.Ready;
 
@@ -825,6 +913,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (_browse is null) return;
 
         var rows = await _browse.GetTracksAsync(BuildRequest(), cancel);
+
+        // The list is going back to reflecting the browser, so the panel's opened release stops
+        // being what's on show and shouldn't stay highlighted.
+        if (_showingDiscographyAlbum)
+        {
+            _showingDiscographyAlbum = false;
+            Discography.SelectedAlbum = null;
+        }
 
         SelectedTracks.Clear();
         Tracks = new ObservableCollection<TrackViewModel>(rows.Select(r => new TrackViewModel(r)));

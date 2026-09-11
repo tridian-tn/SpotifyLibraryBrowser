@@ -16,6 +16,8 @@ public sealed class LibraryFixture : IAsyncDisposable
 
     public LibraryRepository Library { get; private set; } = null!;
 
+    public DiscographyRepository Discography { get; private set; } = null!;
+
     public static readonly Artist Miles = new("ar-miles", "Miles Davis");
     public static readonly Artist Coltrane = new("ar-coltrane", "John Coltrane");
     public static readonly Artist Various = new("ar-various", "Various Artists");
@@ -36,6 +38,7 @@ public sealed class LibraryFixture : IAsyncDisposable
         fixture._database = await LibraryDatabase.OpenInMemoryAsync();
         fixture.Browse = new BrowseRepository(fixture._database);
         fixture.Library = new LibraryRepository(fixture._database);
+        fixture.Discography = new DiscographyRepository(fixture._database);
 
         await fixture.SeedAsync();
         return fixture;

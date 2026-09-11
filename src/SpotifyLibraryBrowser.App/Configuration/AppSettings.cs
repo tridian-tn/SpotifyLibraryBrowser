@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using SpotifyLibraryBrowser.Core.Browsing;
+using SpotifyLibraryBrowser.Core.Discography;
 
 namespace SpotifyLibraryBrowser.App.Configuration;
 
@@ -44,6 +45,13 @@ public sealed class AppSettings
 
     /// <summary>Whether browsing is restricted to albums that are in the library.</summary>
     public bool SavedAlbumsOnly { get; set; } = true;
+
+    /// <summary>How the discography panel orders an artist's releases.</summary>
+    public DiscographySort DiscographySort { get; set; } = DiscographySort.NewestFirst;
+
+    /// <summary>Which kinds of release the discography panel asks for.</summary>
+    public DiscographyGroups DiscographyGroups { get; set; } =
+        DiscographyGroups.Albums | DiscographyGroups.Singles;
 
     /// <summary>The window's last width.</summary>
     public double WindowWidth { get; set; } = 1280;
