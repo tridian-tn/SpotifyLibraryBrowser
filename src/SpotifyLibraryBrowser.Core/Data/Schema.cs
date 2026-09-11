@@ -84,6 +84,29 @@ internal static class Schema
             value TEXT
         );
 
+        -- An artist's releases as Spotify lists them, fetched on demand when the discography panel
+        -- asks. Deliberately its own table rather than rows in `albums`: that table means "albums
+        -- the library has at least one track from", and mixing browsed discographies into it would
+        -- make the Album column's contents depend on which artists you happened to look at.
+        CREATE TABLE IF NOT EXISTS discography_albums (
+            artist_id         TEXT NOT NULL,
+            album_id          TEXT NOT NULL,
+            name              TEXT NOT NULL,
+            release_date      TEXT,
+            release_precision INTEGER NOT NULL DEFAULT 0,
+            image_url         TEXT,
+            total_tracks      INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (artist_id, album_id)
+        );
+
+        -- Records which groups a cached discography was fetched with, so asking for a wider set
+        -- than last time refetches rather than quietly answering from the narrower cache.
+        CREATE TABLE IF NOT EXISTS discography_fetches (
+            artist_id  TEXT PRIMARY KEY,
+            fetched_at TEXT NOT NULL,
+            groups     INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS ix_tracks_album          ON tracks(album_id);
         CREATE INDEX IF NOT EXISTS ix_tracks_liked          ON tracks(is_liked);
         CREATE INDEX IF NOT EXISTS ix_tracks_name           ON tracks(name COLLATE NOCASE);

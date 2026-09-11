@@ -156,10 +156,11 @@
                         Command="{Binding PlayAllCommand}" />
             </DockPanel>
 
-            <!-- Column browser -->
+            <!-- Column browser, with the discography panel alongside it -->
             <Border Grid.Row="1" Height="300" BorderThickness="0,1,0,1"
                     BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
-                <DockPanel>
+              <Grid ColumnDefinitions="*,Auto,Auto">
+                <DockPanel Grid.Column="0">
                     <StackPanel DockPanel.Dock="Right" Margin="6" Spacing="4" VerticalAlignment="Top">
                         <Button Content="+" ToolTip.Tip="Add column" Width="30"
                                 Command="{Binding AddColumnCommand}" />
@@ -208,6 +209,93 @@
                         </ItemsControl>
                     </ScrollViewer>
                 </DockPanel>
+
+                <GridSplitter Grid.Column="1" Width="4" ResizeDirection="Columns"
+                              Background="Transparent"
+                              IsVisible="{Binding Discography.IsVisible}" />
+
+                <!-- Discography: what else this artist made, including records not in the library.
+                     A panel rather than a column because these albums have no indexed tracks, so
+                     they can't take part in the columns' filter chain. -->
+                <Border Grid.Column="2" Width="330" IsVisible="{Binding Discography.IsVisible}"
+                        BorderThickness="1,0,0,0" Padding="8"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                    <DockPanel>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Button DockPanel.Dock="Right" Content="↻" Width="28" Padding="0"
+                                    ToolTip.Tip="Fetch this discography again"
+                                    Command="{Binding Discography.RefreshCommand}" />
+                            <TextBlock Text="{Binding Discography.ArtistName}" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+
+                        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,*" Margin="0,0,0,6">
+                            <ComboBox Grid.Column="0" Margin="0,0,3,0" HorizontalAlignment="Stretch"
+                                      ItemsSource="{Binding Discography.SortChoices}"
+                                      SelectedValue="{Binding Discography.Sort}"
+                                      SelectedValueBinding="{Binding Value}"
+                                      ToolTip.Tip="Order">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SortChoice">
+                                        <TextBlock Text="{Binding Label}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+
+                            <ComboBox Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                      ItemsSource="{Binding Discography.GroupChoices}"
+                                      SelectedValue="{Binding Discography.Groups}"
+                                      SelectedValueBinding="{Binding Value}"
+                                      ToolTip.Tip="Which kinds of release to include">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:GroupChoice">
+                                        <TextBlock Text="{Binding Label}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </Grid>
+
+                        <TextBlock DockPanel.Dock="Top" Classes="hint" Margin="0,0,0,4"
+                                   IsVisible="{Binding Discography.IsLoading}"
+                                   Text="Loading…" />
+
+                        <TextBlock DockPanel.Dock="Bottom" Classes="hint" Margin="0,4,0,0"
+                                   IsVisible="{Binding Discography.Message,
+                                               Converter={x:Static ObjectConverters.IsNotNull}}"
+                                   Text="{Binding Discography.Message}" />
+
+                        <ListBox ItemsSource="{Binding Discography.Albums}" SelectionMode="Single">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:DiscographyAlbumViewModel">
+                                    <DockPanel>
+                                        <!-- Filled heart for a record already in the library,
+                                             hollow for one to add. -->
+                                        <Button DockPanel.Dock="Right" Classes="heart"
+                                                VerticalAlignment="Center"
+                                                Content="{Binding IsSaved,
+                                                          Converter={x:Static vm:HeartConverter.Instance}}"
+                                                ToolTip.Tip="Add to or remove from your library"
+                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Discography.ToggleSavedCommand}"
+                                                CommandParameter="{Binding}" />
+
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Classes="hint" FontSize="11"
+                                                       Text="{Binding Detail}" />
+                                            <TextBlock Classes="hint" FontSize="11"
+                                                       Foreground="{DynamicResource SystemAccentColor}"
+                                                       IsVisible="{Binding Held,
+                                                                   Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                       Text="{Binding Held}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+              </Grid>
             </Border>
 
             <GridSplitter Grid.Row="2" Height="4" HorizontalAlignment="Stretch"
