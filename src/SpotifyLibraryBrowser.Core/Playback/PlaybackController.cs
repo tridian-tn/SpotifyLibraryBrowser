@@ -17,6 +17,11 @@ public enum PlaybackOutcome
     Failed = 2
 }
 
+/// <summary>What came of queueing a selection.</summary>
+/// <param name="Queued">How many tracks made it into the queue</param>
+/// <param name="Failure">Why it stopped, or null when it didn't</param>
+public sealed record QueueResult(int Queued, string? Failure);
+
 /// <summary>
 /// Drives playback on whatever Spotify client is already running.
 /// </summary>
@@ -30,6 +35,9 @@ public enum PlaybackOutcome
 /// <param name="throttle">The shared rate gate</param>
 public sealed class PlaybackController(IPlayerClient player, RequestThrottle throttle)
 {
+    /// <summary>How many tracks a single queue request will add before it stops.</summary>
+    public const int MaxQueued = 50;
+
     /// <summary>Lists the Connect devices available to play on.</summary>
     /// <param name="cancel">Cancels the call</param>
     /// <returns>The available devices, empty when none are live</returns>
@@ -103,6 +111,48 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
 
         var request = new PlayerResumePlaybackRequest { Uris = trackUris.ToList() };
         return await ResumeAsync(request, trackUris[0], deviceId, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Adds tracks to the end of the play queue.
+    /// </summary>
+    /// <remarks>
+    /// Spotify queues one URI per request, so a big selection is a lot of requests. This stops at
+    /// <see cref="MaxQueued"/> rather than spending a rate-limit window queueing an entire
+    /// discography, and tells the caller how many made it.
+    /// </remarks>
+    /// <param name="trackUris">The tracks to queue, in order</param>
+    /// <param name="deviceId">The device to queue on, or null for the active one</param>
+    /// <param name="cancel">Cancels the request</param>
+    /// <returns>How many were queued, and why it stopped if it did</returns>
+    public async Task<QueueResult> QueueAsync(
+        IReadOnlyList<string> trackUris,
+        string? deviceId = null,
+        CancellationToken cancel = default)
+    {
+        var queued = 0;
+
+        foreach (var uri in trackUris.Take(MaxQueued))
+        {
+            var request = new PlayerAddToQueueRequest(uri);
+            if (!string.IsNullOrEmpty(deviceId)) request.DeviceId = deviceId;
+
+            try
+            {
+                await throttle.WaitAsync(cancel).ConfigureAwait(false);
+                await player.AddToQueue(request, cancel).ConfigureAwait(false);
+                queued++;
+            }
+            catch (APIException e)
+            {
+                // Carry the reason back rather than collapsing every refusal into "no device".
+                // No active device and a non-Premium account both land here, and telling someone
+                // the wrong one sends them looking in the wrong place.
+                return new QueueResult(queued, e.Message);
+            }
+        }
+
+        return new QueueResult(queued, null);
     }
 
     /// <summary>Pauses playback.</summary>

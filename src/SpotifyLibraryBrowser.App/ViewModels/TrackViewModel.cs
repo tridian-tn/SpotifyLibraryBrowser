@@ -14,6 +14,10 @@ public sealed partial class TrackViewModel(TrackRow row) : ObservableObject
     [ObservableProperty]
     private bool _isLiked = row.IsLiked;
 
+    /// <summary>Whether this track's album is itself in the library.</summary>
+    [ObservableProperty]
+    private bool _albumIsSaved = row.AlbumIsSaved;
+
     /// <summary>The underlying row.</summary>
     public TrackRow Row { get; } = row;
 
@@ -31,6 +35,9 @@ public sealed partial class TrackViewModel(TrackRow row) : ObservableObject
 
     /// <summary>The album title.</summary>
     public string AlbumName => Row.AlbumName;
+
+    /// <summary>The album's Spotify ID.</summary>
+    public string AlbumId => Row.AlbumId;
 
     /// <summary>The album's Spotify URI, used to play the track in album context.</summary>
     public string AlbumUri => $"spotify:album:{Row.AlbumId}";

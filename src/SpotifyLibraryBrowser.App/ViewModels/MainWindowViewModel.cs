@@ -44,7 +44,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private LibraryDatabase? _database;
     private LibraryRepository? _repository;
     private BrowseRepository? _browse;
-    private LikeService? _likes;
+    private LibraryWriteService? _library;
     private PlaybackController? _playback;
     private LibrarySyncService? _sync;
     private PkceAuthService? _auth;
@@ -91,6 +91,22 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private int _trackCount;
+
+    [ObservableProperty]
+    private bool _hasSelection;
+
+    [ObservableProperty]
+    private bool _selectedAlbumsAreSaved;
+
+    /// <summary>What the album action in the track list's menu currently offers to do.</summary>
+    [ObservableProperty]
+    private string _albumActionText = "Save album to library";
+
+    /// <summary>Watches the selection so the album action can offer the right verb for it.</summary>
+    public MainWindowViewModel()
+    {
+        SelectedTracks.CollectionChanged += (_, _) => UpdateSelectionState();
+    }
 
     /// <summary>The browser's columns, left to right.</summary>
     public ObservableCollection<ColumnViewModel> Columns { get; } = [];
@@ -313,6 +329,87 @@ public sealed partial class MainWindowViewModel : ObservableObject
             : "Couldn't start playback on a Connect device.";
     }
 
+    /// <summary>
+    /// Adds or removes the selected tracks' albums, whichever way round the selection currently is.
+    /// </summary>
+    /// <remarks>
+    /// Saving matters as much as removing because of the saved-albums filter: with it off the
+    /// browser shows albums that only turned up through a liked song or a playlist, and those are
+    /// exactly the records worth adding.
+    /// </remarks>
+    [RelayCommand]
+    private async Task ToggleSelectedAlbumsSavedAsync()
+    {
+        if (_library is null) return;
+
+        var albumIds = SelectedTracks.Select(t => t.AlbumId).Distinct().ToList();
+        if (albumIds.Count == 0) return;
+
+        var save = !SelectedAlbumsAreSaved;
+
+        // Every row from those albums moves, not just the selected ones — an album is saved or it
+        // isn't, and leaving its other tracks showing the old state would be a lie.
+        var affected = Tracks.Where(t => albumIds.Contains(t.AlbumId)).ToList();
+
+        foreach (var track in affected)
+        {
+            track.AlbumIsSaved = save;
+        }
+
+        // Only the write is rolled back on failure. Reloading afterwards is a separate concern:
+        // if a query failed once the album was already saved, undoing the flags here would leave
+        // the list claiming the opposite of what Spotify and the index both hold.
+        try
+        {
+            await _library.SetAlbumsSavedAsync(albumIds, save);
+        }
+        catch (Exception e)
+        {
+            foreach (var track in affected)
+            {
+                track.AlbumIsSaved = !save;
+            }
+
+            UpdateSelectionState();
+            Status = $"Couldn't update your library: {e.Message}";
+            return;
+        }
+
+        var noun = albumIds.Count == 1 ? "album" : $"{albumIds.Count} albums";
+        Status = save ? $"Saved {noun} to your library." : $"Removed {noun} from your library.";
+
+        UpdateSelectionState();
+
+        // Saved state is what the Album and Album Artist columns browse, so the columns themselves
+        // have changed, not just these rows.
+        await RefreshAllAsync();
+    }
+
+    /// <summary>Queues the selected tracks to play after whatever's on now.</summary>
+    [RelayCommand]
+    private async Task QueueSelectionAsync()
+    {
+        if (_playback is null) return;
+
+        var uris = SelectedTracks.Select(t => t.Uri).ToList();
+        if (uris.Count == 0) return;
+
+        var result = await _playback.QueueAsync(uris, SelectedDevice?.Id);
+
+        // Say what Spotify actually said. Guessing at "no device" would be wrong whenever the real
+        // reason was the account, and would send someone looking in the wrong place.
+        Status = result switch
+        {
+            { Queued: 0, Failure: { } why } => $"Couldn't queue: {why}",
+            { Queued: 0 } => "Couldn't queue: nothing was accepted.",
+            { Failure: { } why } => $"Queued {result.Queued} of {uris.Count} tracks, then stopped: {why}",
+            _ when result.Queued < uris.Count =>
+                $"Queued {result.Queued} tracks, the most one request adds.",
+            { Queued: 1 } => "Queued 1 track.",
+            _ => $"Queued {result.Queued} tracks."
+        };
+    }
+
     /// <summary>Flips one track's liked state.</summary>
     /// <param name="track">The track to like or unlike</param>
     [RelayCommand]
@@ -331,7 +428,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task UndoLikeAsync()
     {
-        if (_likes is null || _lastLikeChange.Count == 0) return;
+        if (_library is null || _lastLikeChange.Count == 0) return;
 
         var ids = _lastLikeChange.ToList();
         var restore = !_lastLikeWasLiking;
@@ -348,7 +445,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         try
         {
-            await _likes.SetLikedAsync(ids, restore);
+            await _library.SetTracksLikedAsync(ids, restore);
 
             // Only forget the undo once it's actually been applied, so a failure can be retried.
             ClearUndo();
@@ -459,14 +556,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// </remarks>
     public async Task ReconcileLikesAsync()
     {
-        if (_likes is null || Tracks.Count == 0) return;
+        if (_library is null || Tracks.Count == 0) return;
 
         // One request's worth is plenty — it's the rows in front of the user that matter.
         var visible = Tracks.Take(50).ToList();
 
         try
         {
-            var corrections = await _likes.ReconcileAsync(visible.Select(t => t.Id).ToList());
+            var corrections = await _library.ReconcileTracksAsync(visible.Select(t => t.Id).ToList());
 
             foreach (var track in visible)
             {
@@ -530,7 +627,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         bool liked,
         bool recordUndo = true)
     {
-        if (_likes is null || tracks.Count == 0) return;
+        if (_library is null || tracks.Count == 0) return;
 
         // Only the tracks actually changing are sent, so an undo restores exactly that set.
         var changing = tracks.Where(t => t.IsLiked != liked).ToList();
@@ -543,7 +640,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         try
         {
-            await _likes.SetLikedAsync(changing.Select(t => t.Id).ToList(), liked);
+            await _library.SetTracksLikedAsync(changing.Select(t => t.Id).ToList(), liked);
 
             if (recordUndo && !liked) SetUndo(changing.Select(t => t.Id), liked);
 
@@ -560,6 +657,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
             Status = $"Couldn't update Liked Songs: {e.Message}";
         }
+    }
+
+    /// <summary>Recomputes what the album action should offer for the current selection.</summary>
+    private void UpdateSelectionState()
+    {
+        HasSelection = SelectedTracks.Count > 0;
+
+        var albumIds = SelectedTracks.Select(t => t.AlbumId).Distinct().ToList();
+
+        // A mixed selection counts as not-saved, so the offer is to save. That's the direction
+        // that adds rather than removes, which is the safer way for an ambiguous click to go.
+        SelectedAlbumsAreSaved = albumIds.Count > 0 && SelectedTracks.All(t => t.AlbumIsSaved);
+
+        var noun = albumIds.Count > 1 ? $"{albumIds.Count} albums" : "album";
+
+        AlbumActionText = SelectedAlbumsAreSaved
+            ? $"Remove {noun} from library"
+            : $"Save {noun} to library";
     }
 
     /// <summary>Remembers a change so it can be taken back.</summary>
@@ -623,7 +738,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private async Task OnSignedInAsync(SpotifyClient client)
     {
         _sync = new LibrarySyncService(client, _repository!, _throttle);
-        _likes = new LikeService(client.Library, _repository!, _throttle);
+        _library = new LibraryWriteService(client.Library, _repository!, _throttle);
         _playback = new PlaybackController(client.Player, _throttle);
 
         State = AppState.Ready;
