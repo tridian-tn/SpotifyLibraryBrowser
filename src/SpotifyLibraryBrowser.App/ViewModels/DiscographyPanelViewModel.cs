@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SpotifyAPI.Web;
 using SpotifyLibraryBrowser.Core.Data;
 using SpotifyLibraryBrowser.Core.Discography;
 using SpotifyLibraryBrowser.Core.Library;
@@ -64,6 +65,7 @@ public sealed partial class DiscographyPanelViewModel : ObservableObject
     private DiscographyService? _service;
     private LibraryWriteService? _library;
     private PlaybackController? _playback;
+    private ILibraryClient? _libraryClient;
     private CancellationTokenSource? _loading;
     private IReadOnlyList<DiscographyAlbum> _loaded = [];
     private string? _artistId;
@@ -94,6 +96,19 @@ public sealed partial class DiscographyPanelViewModel : ObservableObject
     /// <summary>Raised when a save changes the library, so the browser can reload.</summary>
     public event Action? LibraryChanged;
 
+    /// <summary>
+    /// Raised when a release is picked, carrying its tracks for the main list to show.
+    /// </summary>
+    /// <remarks>
+    /// The panel is too narrow to list tracks usefully, and the main list already has the columns
+    /// and the actions. So the panel fetches and the window decides what to do with them.
+    /// </remarks>
+    public event Action<DiscographyAlbumViewModel, IReadOnlyList<DiscographyTrack>>? AlbumPicked;
+
+    /// <summary>The release whose tracks are on show, if any.</summary>
+    [ObservableProperty]
+    private DiscographyAlbumViewModel? _selectedAlbum;
+
     /// <summary>The sort orders offered, paired with something readable.</summary>
     public IReadOnlyList<SortChoice> SortChoices { get; } =
     [
@@ -117,11 +132,17 @@ public sealed partial class DiscographyPanelViewModel : ObservableObject
     /// <param name="service">Fetches and caches discographies</param>
     /// <param name="library">Used to save an album straight from the panel</param>
     /// <param name="playback">Used to play one</param>
-    public void Connect(DiscographyService service, LibraryWriteService library, PlaybackController playback)
+    /// <param name="libraryClient">Used to ask which tracks of a listed release are liked</param>
+    public void Connect(
+        DiscographyService service,
+        LibraryWriteService library,
+        PlaybackController playback,
+        ILibraryClient libraryClient)
     {
         _service = service;
         _library = library;
         _playback = playback;
+        _libraryClient = libraryClient;
     }
 
     /// <summary>Restores the remembered sort and grouping without triggering a reload.</summary>
@@ -161,6 +182,7 @@ public sealed partial class DiscographyPanelViewModel : ObservableObject
         _artistId = artistId;
         ArtistName = artistName;
         IsVisible = true;
+        SelectedAlbum = null;
 
         await LoadAsync(refresh: false);
     }
@@ -178,6 +200,34 @@ public sealed partial class DiscographyPanelViewModel : ObservableObject
     /// <summary>Fetches the current artist's releases again, ignoring the cache.</summary>
     [RelayCommand]
     private Task RefreshAsync() => LoadAsync(refresh: true);
+
+    /// <summary>
+    /// Lists a release's tracks, fetching them since nothing about them is in the index.
+    /// </summary>
+    /// <param name="album">The release to open</param>
+    [RelayCommand]
+    private async Task OpenAlbumAsync(DiscographyAlbumViewModel? album)
+    {
+        if (album is null || _service is null || _libraryClient is null) return;
+
+        SelectedAlbum = album;
+        IsLoading = true;
+        Message = null;
+
+        try
+        {
+            var tracks = await _service.GetTracksAsync(album.Id, album.Name, _libraryClient);
+            AlbumPicked?.Invoke(album, tracks);
+        }
+        catch (Exception e)
+        {
+            Message = $"Couldn't list {album.Name}: {e.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
 
     /// <summary>Plays a release on the chosen Connect device.</summary>
     /// <param name="album">The release to play</param>

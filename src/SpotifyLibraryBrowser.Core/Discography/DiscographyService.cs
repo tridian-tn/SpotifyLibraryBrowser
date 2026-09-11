@@ -14,10 +14,12 @@ namespace SpotifyLibraryBrowser.Core.Discography;
 /// fetches one artist at a time, when the panel asks, and keeps the answer.
 /// </remarks>
 /// <param name="artists">The artist endpoints, taken narrowly so this is testable with a stub</param>
+/// <param name="albums">The album endpoints, for listing a release that isn't in the library</param>
 /// <param name="repository">Where fetched discographies are kept</param>
 /// <param name="throttle">The shared rate gate</param>
 public sealed class DiscographyService(
     IArtistsClient artists,
+    IAlbumsClient albums,
     DiscographyRepository repository,
     RequestThrottle throttle)
 {
@@ -35,6 +37,12 @@ public sealed class DiscographyService(
     /// because this runs on demand for one artist rather than across the whole library.
     /// </remarks>
     private const int PageSize = 10;
+
+    /// <summary>How many tracks to ask for per page of an album listing.</summary>
+    private const int TrackPageSize = 50;
+
+    /// <summary>How many track URIs one liked-state check may carry.</summary>
+    private const int CheckBatchSize = 50;
 
     /// <summary>
     /// Gets an artist's releases, fetching them if they aren't cached.
@@ -65,6 +73,96 @@ public sealed class DiscographyService(
         // Read back rather than returning what was fetched: the stored rows come back joined to
         // the library, which is the part that makes the list worth looking at.
         return await repository.GetAsync(artistId, sort, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Fetches the track listing of a release that isn't in the library.
+    /// </summary>
+    /// <remarks>
+    /// Nothing about these tracks is in the local index, so they can't come from a browse query.
+    /// Liked state is asked of Spotify in one further call rather than guessed, so the hearts mean
+    /// what they do everywhere else in the app and liking from here works.
+    /// </remarks>
+    /// <param name="albumId">The album to list</param>
+    /// <param name="albumName">The album's title, for the rows</param>
+    /// <param name="library">Used to ask which of the tracks are liked</param>
+    /// <param name="cancel">Cancels the work</param>
+    /// <returns>The album's tracks, in running order</returns>
+    public async Task<IReadOnlyList<DiscographyTrack>> GetTracksAsync(
+        string albumId,
+        string albumName,
+        ILibraryClient library,
+        CancellationToken cancel = default)
+    {
+        var tracks = new List<DiscographyTrack>();
+        var offset = 0;
+
+        while (true)
+        {
+            await throttle.WaitAsync(cancel).ConfigureAwait(false);
+
+            var page = await albums
+                .GetTracks(albumId, new AlbumTracksRequest { Limit = TrackPageSize, Offset = offset }, cancel)
+                .ConfigureAwait(false);
+
+            if (page.Items is not { Count: > 0 }) break;
+
+            foreach (var track in page.Items)
+            {
+                if (string.IsNullOrEmpty(track.Id)) continue;
+
+                tracks.Add(new DiscographyTrack(
+                    track.Id,
+                    track.Uri,
+                    track.Name,
+                    string.Join(", ", track.Artists?.Select(a => a.Name) ?? []),
+                    albumId,
+                    albumName,
+                    track.DiscNumber,
+                    track.TrackNumber,
+                    track.DurationMs,
+                    track.Explicit,
+                    IsLiked: false));
+            }
+
+            offset += page.Items.Count;
+            if (offset >= page.Total) break;
+        }
+
+        return await MarkLikedAsync(tracks, library, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>Asks Spotify which of the tracks are liked, a request's worth at a time.</summary>
+    /// <param name="tracks">The tracks to check</param>
+    /// <param name="library">The library endpoints</param>
+    /// <param name="cancel">Cancels the work</param>
+    /// <returns>The tracks with their liked state filled in</returns>
+    private async Task<IReadOnlyList<DiscographyTrack>> MarkLikedAsync(
+        IReadOnlyList<DiscographyTrack> tracks,
+        ILibraryClient library,
+        CancellationToken cancel)
+    {
+        if (tracks.Count == 0) return tracks;
+
+        var marked = new List<DiscographyTrack>(tracks.Count);
+
+        foreach (var chunk in tracks.Chunk(CheckBatchSize))
+        {
+            var uris = chunk.Select(t => $"spotify:track:{t.Id}").ToList();
+
+            await throttle.WaitAsync(cancel).ConfigureAwait(false);
+
+            var liked = await library
+                .CheckItems(new LibraryCheckItemsRequest(uris), cancel)
+                .ConfigureAwait(false);
+
+            for (var i = 0; i < chunk.Length; i++)
+            {
+                marked.Add(chunk[i] with { IsLiked = i < liked.Count && liked[i] });
+            }
+        }
+
+        return marked;
     }
 
     /// <summary>Walks the artist's albums from Spotify.</summary>

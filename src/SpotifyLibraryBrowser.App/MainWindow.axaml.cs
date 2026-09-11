@@ -31,6 +31,7 @@ public partial class MainWindow : Window
         ColumnsHost.AddHandler(SelectingItemsControl.SelectionChangedEvent, OnColumnSelectionChanged);
         TrackTable.AddHandler(SelectingItemsControl.SelectionChangedEvent, OnTrackSelectionChanged);
         TrackTable.DoubleTapped += OnTrackDoubleTapped;
+        DiscographyList.AddHandler(SelectingItemsControl.SelectionChangedEvent, OnDiscographySelectionChanged);
 
         _playbackTimer.Tick += async (_, _) => await RefreshPlaybackAsync();
 
@@ -196,6 +197,19 @@ public partial class MainWindow : Window
 
         await clipboard.SetTextAsync(_model.RedirectUri);
         _model.RedirectUriCopied = true;
+    }
+
+    /// <summary>
+    /// Lists the tracks of whichever release was picked in the discography panel.
+    /// </summary>
+    /// <param name="sender">The discography list</param>
+    /// <param name="e">The selection change</param>
+    private void OnDiscographySelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_model is null) return;
+        if (DiscographyList.SelectedItem is not DiscographyAlbumViewModel album) return;
+
+        _model.Discography.OpenAlbumCommand.Execute(album);
     }
 
     /// <summary>Plays the double-clicked track.</summary>

@@ -232,7 +232,7 @@
                         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,*" Margin="0,0,0,6">
                             <ComboBox Grid.Column="0" Margin="0,0,3,0" HorizontalAlignment="Stretch"
                                       ItemsSource="{Binding Discography.SortChoices}"
-                                      SelectedValue="{Binding Discography.Sort}"
+                                      SelectedValue="{Binding Discography.Sort, Mode=TwoWay}"
                                       SelectedValueBinding="{Binding Value}"
                                       ToolTip.Tip="Order">
                                 <ComboBox.ItemTemplate>
@@ -244,7 +244,7 @@
 
                             <ComboBox Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                       ItemsSource="{Binding Discography.GroupChoices}"
-                                      SelectedValue="{Binding Discography.Groups}"
+                                      SelectedValue="{Binding Discography.Groups, Mode=TwoWay}"
                                       SelectedValueBinding="{Binding Value}"
                                       ToolTip.Tip="Which kinds of release to include">
                                 <ComboBox.ItemTemplate>
@@ -264,7 +264,9 @@
                                                Converter={x:Static ObjectConverters.IsNotNull}}"
                                    Text="{Binding Discography.Message}" />
 
-                        <ListBox ItemsSource="{Binding Discography.Albums}" SelectionMode="Single">
+                        <ListBox Name="DiscographyList" SelectionMode="Single"
+                                 ItemsSource="{Binding Discography.Albums}"
+                                 SelectedItem="{Binding Discography.SelectedAlbum, Mode=TwoWay}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="vm:DiscographyAlbumViewModel">
                                     <DockPanel>

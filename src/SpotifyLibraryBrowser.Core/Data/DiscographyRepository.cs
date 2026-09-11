@@ -37,9 +37,12 @@ public sealed class DiscographyRepository(LibraryDatabase database)
         if (!DateTimeOffset.TryParse(reader.GetString(0), out var fetchedAt)) return false;
         if (DateTimeOffset.UtcNow - fetchedAt > maxAge) return false;
 
-        // The cached groups have to cover what's being asked for, not merely overlap it.
+        // Exactly the same groups, not merely a set that covers them. A stored listing is the
+        // answer to one particular question, and nothing on the rows records which group each came
+        // from — album_type is deprecated — so a wider listing can't be narrowed after the fact.
+        // Treating it as usable made changing the filter downwards appear to do nothing at all.
         var cached = (DiscographyGroups)reader.GetInt32(1);
-        return (groups & ~cached) == 0;
+        return groups == cached;
     }
 
     /// <summary>Replaces an artist's stored discography.</summary>

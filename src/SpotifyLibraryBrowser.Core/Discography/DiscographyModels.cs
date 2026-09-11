@@ -77,3 +77,34 @@ public sealed record DiscographyAlbum(
     /// <remarks>This is the "you've liked three tracks off this, want the record?" case.</remarks>
     public bool IsPartiallyHeld => !IsSaved && TracksHeld > 0;
 }
+
+/// <summary>
+/// A track on a release that isn't in the library, fetched to be shown in the track list.
+/// </summary>
+/// <remarks>
+/// Kept apart from the indexed track model on purpose: these rows are transient, belong to no
+/// browse query, and disappear the moment the browser's selection moves on.
+/// </remarks>
+/// <param name="Id">The Spotify track ID</param>
+/// <param name="Uri">The Spotify URI, for playing and liking</param>
+/// <param name="Name">The track title</param>
+/// <param name="ArtistNames">The credited artists, in credit order</param>
+/// <param name="AlbumId">The album it belongs to</param>
+/// <param name="AlbumName">That album's title</param>
+/// <param name="DiscNumber">The disc number</param>
+/// <param name="TrackNumber">The track's position on its disc</param>
+/// <param name="DurationMs">Track length in milliseconds</param>
+/// <param name="Explicit">Whether it's flagged explicit</param>
+/// <param name="IsLiked">Whether it's in Liked Songs, as Spotify reports it</param>
+public sealed record DiscographyTrack(
+    string Id,
+    string Uri,
+    string Name,
+    string ArtistNames,
+    string AlbumId,
+    string AlbumName,
+    int DiscNumber,
+    int TrackNumber,
+    int DurationMs,
+    bool Explicit,
+    bool IsLiked);

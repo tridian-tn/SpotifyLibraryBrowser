@@ -104,19 +104,26 @@ public sealed class DiscographyTests
     }
 
     [Fact]
-    public async Task A_cache_built_with_fewer_groups_does_not_answer_for_more()
+    public async Task A_cache_only_answers_for_exactly_the_groups_it_was_built_with()
     {
         await using var fixture = await LibraryFixture.CreateAsync();
         var repository = fixture.Discography;
+        var both = DiscographyGroups.Albums | DiscographyGroups.Singles;
 
         await repository.SaveAsync("ar-1", DiscographyGroups.Albums, [Album("Debut", "1993-07-05")]);
 
         // Albums alone was what was fetched, so albums alone is what it can answer for.
         Assert.True(await repository.IsCachedAsync("ar-1", DiscographyGroups.Albums, TimeSpan.FromDays(7)));
 
-        // Asking for singles as well can't be served from a listing that never had any.
-        Assert.False(await repository.IsCachedAsync(
-            "ar-1", DiscographyGroups.Albums | DiscographyGroups.Singles, TimeSpan.FromDays(7)));
+        // Asking for singles too can't be served from a listing that never had any.
+        Assert.False(await repository.IsCachedAsync("ar-1", both, TimeSpan.FromDays(7)));
+
+        await repository.SaveAsync("ar-2", both, [Album("Debut", "1993-07-05")]);
+
+        // Nor can narrowing be served from a wider listing: nothing on the rows says which group
+        // each came from, so the singles couldn't be dropped even if we wanted to.
+        Assert.False(await repository.IsCachedAsync("ar-2", DiscographyGroups.Albums, TimeSpan.FromDays(7)));
+        Assert.True(await repository.IsCachedAsync("ar-2", both, TimeSpan.FromDays(7)));
     }
 
     [Fact]
