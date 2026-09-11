@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.Input;
 using SpotifyAPI.Web;
 using SpotifyLibraryBrowser.Core.Data;
 using SpotifyLibraryBrowser.Core.Discography;
+using SpotifyLibraryBrowser.Core.Model;
 using SpotifyLibraryBrowser.Core.Library;
 using SpotifyLibraryBrowser.Core.Playback;
 
@@ -20,6 +21,7 @@ public sealed partial class DiscographyAlbumViewModel(DiscographyAlbum album) : 
 {
     /// <summary>Whether the album is in the library, flipped optimistically when saved.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Held))]
     private bool _isSaved = album.IsSaved;
 
     /// <summary>The Spotify album ID.</summary>
@@ -30,6 +32,9 @@ public sealed partial class DiscographyAlbumViewModel(DiscographyAlbum album) : 
 
     /// <summary>The album title.</summary>
     public string Name => album.Name;
+
+    /// <summary>The underlying release, for writing it into the index when it gets saved.</summary>
+    public DiscographyAlbum Album => album;
 
     /// <summary>Release year and track count, as one line.</summary>
     public string Detail =>
@@ -43,9 +48,10 @@ public sealed partial class DiscographyAlbumViewModel(DiscographyAlbum album) : 
     /// </summary>
     /// <remarks>
     /// The partial case is the interesting one: a few liked tracks off a record you never saved is
-    /// exactly the prompt to save it.
+    /// exactly the prompt to save it. Read off the live IsSaved rather than the record it was built
+    /// from, so saving the release clears the hint instead of leaving it contradicting the heart.
     /// </remarks>
-    public string Held => album.IsPartiallyHeld
+    public string Held => !IsSaved && album.TracksHeld > 0
         ? $"{album.TracksHeld} of {album.TotalTracks} in library"
         : string.Empty;
 }
@@ -251,8 +257,19 @@ public sealed partial class DiscographyPanelViewModel : ObservableObject
 
         try
         {
-            await _library.SetAlbumsSavedAsync([album.Id], save);
-            Message = save ? $"Saved {album.Name}." : $"Removed {album.Name}.";
+            // Through the single-album path: a release found here often has no row in the index,
+            // and setting a flag on a row that doesn't exist changes nothing.
+            var record = album.Album;
+
+            await _library.SetAlbumSavedAsync(
+                new Album(record.Id, record.Name, record.ReleaseDate, record.ReleasePrecision,
+                    record.ImageUrl, record.TotalTracks, save ? DateTimeOffset.UtcNow : null, save),
+                _artistId is null ? [] : [new Artist(_artistId, ArtistName ?? string.Empty)],
+                save);
+
+            Message = save
+                ? $"Saved {album.Name}. Its tracks arrive with the next sync."
+                : $"Removed {album.Name}.";
 
             // The browser's Album and Album Artist columns read saved state, so they're now stale.
             LibraryChanged?.Invoke();

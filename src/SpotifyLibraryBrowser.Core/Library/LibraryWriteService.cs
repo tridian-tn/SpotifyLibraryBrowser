@@ -80,6 +80,29 @@ public sealed class LibraryWriteService(
     }
 
     /// <summary>
+    /// Saves or removes a single album, creating its row first when the index doesn't have one.
+    /// </summary>
+    /// <remarks>
+    /// For releases reached through the discography panel rather than through a track the library
+    /// already holds. Without the row, setting the saved flag updates nothing and the save appears
+    /// to succeed while changing nothing locally. The album's tracks arrive with the next sync.
+    /// </remarks>
+    /// <param name="album">The album, carrying enough to create its row</param>
+    /// <param name="artists">Its credited artists</param>
+    /// <param name="saved">Whether it should end up in the library</param>
+    /// <param name="cancel">Cancels the change</param>
+    public async Task SetAlbumSavedAsync(
+        Model.Album album,
+        IReadOnlyList<Model.Artist> artists,
+        bool saved,
+        CancellationToken cancel = default)
+    {
+        if (saved) await repository.EnsureAlbumAsync(album, artists, cancel).ConfigureAwait(false);
+
+        await SetAlbumsSavedAsync([album.Id], saved, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Re-reads liked state for a handful of tracks and corrects the index.
     /// </summary>
     /// <remarks>

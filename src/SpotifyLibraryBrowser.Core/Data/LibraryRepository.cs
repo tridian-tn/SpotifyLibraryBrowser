@@ -176,6 +176,29 @@ public sealed class LibraryRepository(LibraryDatabase database)
     }
 
     /// <summary>
+    /// Makes sure an album has a row, so a saved flag has somewhere to live.
+    /// </summary>
+    /// <remarks>
+    /// Saving a release found through the discography panel would otherwise update nothing: the
+    /// index only holds albums it has a track from, so <see cref="SetAlbumsSavedAsync"/> would
+    /// match no rows and Spotify would report success while the panel reverted on reload. The
+    /// album's tracks still aren't indexed — the next sync brings those.
+    /// </remarks>
+    /// <param name="album">The album to make sure exists</param>
+    /// <param name="artists">Its credited artists</param>
+    /// <param name="cancel">Cancels the write</param>
+    public async Task EnsureAlbumAsync(
+        Model.Album album,
+        IReadOnlyList<Model.Artist> artists,
+        CancellationToken cancel = default)
+    {
+        await using var writer = await BeginWriteAsync(cancel).ConfigureAwait(false);
+
+        await writer.UpsertAlbumAsync(album, artists, cancel).ConfigureAwait(false);
+        await writer.CommitAsync(cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Clears the state a full rebuild re-establishes, so removals actually disappear.
     /// </summary>
     /// <remarks>
