@@ -23,6 +23,12 @@ public partial class MainWindow : Window
     private MainWindowViewModel? _model;
     private bool _restoring;
 
+    /// <summary>
+    /// Room the rest of the window needs below the browser: the toolbar, the splitter, the track
+    /// list's own minimum, and the status bar.
+    /// </summary>
+    private const double ChromeHeight = 260;
+
     /// <summary>Creates the window and hooks up the events the view model needs.</summary>
     public MainWindow()
     {
@@ -62,6 +68,10 @@ public partial class MainWindow : Window
 
         Width = _model.SavedWidth;
         Height = _model.SavedHeight;
+
+        // The browser row is what the splitter moves, so its height is the thing worth restoring.
+        ConstrainBrowserRow(_model.SavedBrowserHeight);
+        SizeChanged += (_, _) => ConstrainBrowserRow(BrowserGrid.RowDefinitions[1].ActualHeight);
     }
 
     /// <summary>Saves the layout on the way out.</summary>
@@ -69,7 +79,35 @@ public partial class MainWindow : Window
     /// <param name="e">The event data</param>
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        if (_model is not null) await _model.SaveLayoutAsync(Width, Height);
+        if (_model is null) return;
+
+        // The measured height, not the declared one: a splitter may leave a row star-sized, and
+        // Height.Value would then be a star factor rather than a number of pixels.
+        //
+        // Zero means the browser was never laid out — closed while signed out, or still on the
+        // Client ID screen. Writing that would throw away a real divider position and reopen
+        // clamped to the minimum, so the stored one is kept instead.
+        var measured = BrowserGrid.RowDefinitions[1].ActualHeight;
+        var browserHeight = measured > 0 ? measured : _model.SavedBrowserHeight;
+
+        await _model.SaveLayoutAsync(Width, Height, browserHeight);
+    }
+
+    /// <summary>
+    /// Keeps the browser row within what the window can actually show.
+    /// </summary>
+    /// <remarks>
+    /// Applied on resize as well as on open. A browser restored at 540px in a tall window would
+    /// otherwise stay 540px as the window shrank, pushing the track list off the bottom with no
+    /// way to drag it back.
+    /// </remarks>
+    /// <param name="desired">The height wanted, before constraining</param>
+    private void ConstrainBrowserRow(double desired)
+    {
+        var room = Math.Max(120, Height - ChromeHeight);
+        var height = Math.Clamp(desired <= 0 ? 300 : desired, 120, room);
+
+        BrowserGrid.RowDefinitions[1].Height = new GridLength(height, GridUnitType.Pixel);
     }
 
     /// <summary>

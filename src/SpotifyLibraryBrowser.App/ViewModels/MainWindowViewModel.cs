@@ -618,10 +618,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <summary>Records the current window shape and column layout.</summary>
     /// <param name="width">The window's width</param>
     /// <param name="height">The window's height</param>
-    public async Task SaveLayoutAsync(double width, double height)
+    /// <param name="browserHeight">How tall the column browser was left</param>
+    public async Task SaveLayoutAsync(double width, double height, double browserHeight)
     {
         _settings.WindowWidth = width;
         _settings.WindowHeight = height;
+        _settings.BrowserHeight = browserHeight;
         _settings.LikedOnly = LikedOnly;
         _settings.SavedAlbumsOnly = SavedAlbumsOnly;
         _settings.DiscographySort = Discography.Sort;
@@ -636,6 +638,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     /// <summary>The window's remembered height.</summary>
     public double SavedHeight => _settings.WindowHeight;
+
+    /// <summary>How tall the column browser was left last time.</summary>
+    public double SavedBrowserHeight => _settings.BrowserHeight;
 
     /// <summary>Applies a like or unlike optimistically, rolling back if Spotify refuses.</summary>
     /// <param name="tracks">The tracks to change</param>
