@@ -17,6 +17,11 @@ public enum PlaybackOutcome
     Failed = 2
 }
 
+/// <summary>What came of queueing a selection.</summary>
+/// <param name="Queued">How many tracks made it into the queue</param>
+/// <param name="Failure">Why it stopped, or null when it didn't</param>
+public sealed record QueueResult(int Queued, string? Failure);
+
 /// <summary>
 /// Drives playback on whatever Spotify client is already running.
 /// </summary>
@@ -119,8 +124,8 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
     /// <param name="trackUris">The tracks to queue, in order</param>
     /// <param name="deviceId">The device to queue on, or null for the active one</param>
     /// <param name="cancel">Cancels the request</param>
-    /// <returns>How many tracks were queued</returns>
-    public async Task<int> QueueAsync(
+    /// <returns>How many were queued, and why it stopped if it did</returns>
+    public async Task<QueueResult> QueueAsync(
         IReadOnlyList<string> trackUris,
         string? deviceId = null,
         CancellationToken cancel = default)
@@ -138,15 +143,16 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
                 await player.AddToQueue(request, cancel).ConfigureAwait(false);
                 queued++;
             }
-            catch (APIException)
+            catch (APIException e)
             {
-                // No active device, or the account isn't Premium. Stop rather than spend the rest
-                // of the selection discovering the same thing once per track.
-                break;
+                // Carry the reason back rather than collapsing every refusal into "no device".
+                // No active device and a non-Premium account both land here, and telling someone
+                // the wrong one sends them looking in the wrong place.
+                return new QueueResult(queued, e.Message);
             }
         }
 
-        return queued;
+        return new QueueResult(queued, null);
     }
 
     /// <summary>Pauses playback.</summary>

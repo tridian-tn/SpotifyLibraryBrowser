@@ -356,18 +356,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             track.AlbumIsSaved = save;
         }
 
+        // Only the write is rolled back on failure. Reloading afterwards is a separate concern:
+        // if a query failed once the album was already saved, undoing the flags here would leave
+        // the list claiming the opposite of what Spotify and the index both hold.
         try
         {
             await _library.SetAlbumsSavedAsync(albumIds, save);
-
-            var noun = albumIds.Count == 1 ? "album" : $"{albumIds.Count} albums";
-            Status = save ? $"Saved {noun} to your library." : $"Removed {noun} from your library.";
-
-            UpdateSelectionState();
-
-            // Saved state is what the Album and Album Artist columns browse, so the columns
-            // themselves have changed, not just these rows.
-            await RefreshAllAsync();
         }
         catch (Exception e)
         {
@@ -378,7 +372,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
             UpdateSelectionState();
             Status = $"Couldn't update your library: {e.Message}";
+            return;
         }
+
+        var noun = albumIds.Count == 1 ? "album" : $"{albumIds.Count} albums";
+        Status = save ? $"Saved {noun} to your library." : $"Removed {noun} from your library.";
+
+        UpdateSelectionState();
+
+        // Saved state is what the Album and Album Artist columns browse, so the columns themselves
+        // have changed, not just these rows.
+        await RefreshAllAsync();
     }
 
     /// <summary>Queues the selected tracks to play after whatever's on now.</summary>
@@ -390,14 +394,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var uris = SelectedTracks.Select(t => t.Uri).ToList();
         if (uris.Count == 0) return;
 
-        var queued = await _playback.QueueAsync(uris, SelectedDevice?.Id);
+        var result = await _playback.QueueAsync(uris, SelectedDevice?.Id);
 
-        Status = queued switch
+        // Say what Spotify actually said. Guessing at "no device" would be wrong whenever the real
+        // reason was the account, and would send someone looking in the wrong place.
+        Status = result switch
         {
-            0 => "Couldn't queue: no Connect device is playing.",
-            _ when queued < uris.Count => $"Queued {queued} of {uris.Count} tracks.",
-            1 => "Queued 1 track.",
-            _ => $"Queued {queued} tracks."
+            { Queued: 0, Failure: { } why } => $"Couldn't queue: {why}",
+            { Queued: 0 } => "Couldn't queue: nothing was accepted.",
+            { Failure: { } why } => $"Queued {result.Queued} of {uris.Count} tracks, then stopped: {why}",
+            _ when result.Queued < uris.Count =>
+                $"Queued {result.Queued} tracks, the most one request adds.",
+            { Queued: 1 } => "Queued 1 track.",
+            _ => $"Queued {result.Queued} tracks."
         };
     }
 
