@@ -46,6 +46,9 @@ public sealed class AppSettings
     /// <summary>Whether browsing is restricted to albums that are in the library.</summary>
     public bool SavedAlbumsOnly { get; set; } = true;
 
+    /// <summary>Whether list rows are tightened up to fit more on screen.</summary>
+    public bool CompactRows { get; set; }
+
     /// <summary>How the discography panel orders an artist's releases.</summary>
     public DiscographySort DiscographySort { get; set; } = DiscographySort.NewestFirst;
 

@@ -32,6 +32,39 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="FontSize" Value="14" />
         </Style>
+        <!--
+            Compact rows. Fluent's defaults are generous, which is right for touch and wasteful for
+            a library browser you scan. Padding and the minimum height are what actually set a row's
+            height here, since the content is a single line of text.
+        -->
+        <Style Selector="Grid.compact ListBoxItem">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="8,1" />
+        </Style>
+        <!--
+            An explicit height on the row, because clearing its minimum isn't enough on its own —
+            the row theme sizes it. The cell keeps its own horizontal padding: trimming that as well
+            squeezed the 36px heart column until the glyph ellipsised into "...".
+        -->
+        <Style Selector="Grid.compact TableViewRow">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="30" />
+        </Style>
+        <Style Selector="Grid.compact TableViewCell">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="30" />
+            <!-- Tighter horizontally as well as vertically. Padding wider than the default squeezed
+                 the 36px heart column until its glyph ellipsised. -->
+            <Setter Property="Padding" Value="4,0" />
+            <!-- Sized to the row and centred within it. Shortening only the row left the cell at
+                 its original height, cropped to fit, which cut the text off mid-glyph. -->
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Grid.compact Button.heart">
+            <Setter Property="Padding" Value="2,0" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+
         <Style Selector="Button.heart">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -123,7 +156,8 @@
             </StackPanel>
         </Border>
 
-        <Grid Name="BrowserGrid" IsVisible="{Binding IsReady}">
+        <Grid Name="BrowserGrid" IsVisible="{Binding IsReady}"
+              Classes.compact="{Binding CompactRows}">
             <!--
                 The browser row is a pixel height rather than Auto so the splitter has something to
                 change. Auto sizes to content, and the content was itself fixed, which left dragging
@@ -148,6 +182,10 @@
 
                 <CheckBox DockPanel.Dock="Left" Margin="16,0,0,0" Content="Liked only"
                           IsChecked="{Binding LikedOnly}" />
+
+                <CheckBox DockPanel.Dock="Left" Margin="12,0,0,0" Content="Compact"
+                          IsChecked="{Binding CompactRows}"
+                          ToolTip.Tip="Tighten up the list rows so more fits on screen." />
 
                 <CheckBox DockPanel.Dock="Left" Margin="12,0,0,0" Content="Saved albums only"
                           IsChecked="{Binding SavedAlbumsOnly}"
