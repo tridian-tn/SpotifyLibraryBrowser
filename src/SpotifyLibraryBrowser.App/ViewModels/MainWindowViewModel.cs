@@ -80,6 +80,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private bool _savedAlbumsOnly = true;
 
+    /// <summary>Whether list rows are tightened up, so more fits on screen.</summary>
+    [ObservableProperty]
+    private bool _compactRows;
+
     [ObservableProperty]
     private bool _isBusy;
 
@@ -176,6 +180,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _settings = await SettingsStore.LoadAsync();
         LikedOnly = _settings.LikedOnly;
         SavedAlbumsOnly = _settings.SavedAlbumsOnly;
+        CompactRows = _settings.CompactRows;
 
         _database = await LibraryDatabase.OpenAsync(AppPaths.DatabaseFile);
         _repository = new LibraryRepository(_database);
@@ -626,6 +631,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _settings.BrowserHeight = browserHeight;
         _settings.LikedOnly = LikedOnly;
         _settings.SavedAlbumsOnly = SavedAlbumsOnly;
+        _settings.CompactRows = CompactRows;
         _settings.DiscographySort = Discography.Sort;
         _settings.DiscographyGroups = Discography.Groups;
         _settings.Columns = Columns.Select(c => c.Criterion.Criterion).ToList();
@@ -948,6 +954,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <summary>Re-queries when the liked filter is toggled.</summary>
     /// <param name="value">Whether the filter is on</param>
     partial void OnLikedOnlyChanged(bool value) => _ = RefreshAllAsync();
+
+    /// <summary>
+    /// Remembers the row density as soon as it's changed.
+    /// </summary>
+    /// <remarks>
+    /// Written straight away rather than only on close, so a crash or a force-quit doesn't lose a
+    /// preference the user set deliberately. Nothing needs requerying: it's purely how rows look.
+    /// </remarks>
+    /// <param name="value">Whether rows are compact</param>
+    partial void OnCompactRowsChanged(bool value)
+    {
+        _settings.CompactRows = value;
+        _ = PersistSettingsAsync();
+    }
 
     /// <summary>Re-queries and remembers the choice when the saved-albums filter is toggled.</summary>
     /// <param name="value">Whether browsing is restricted to saved albums</param>
