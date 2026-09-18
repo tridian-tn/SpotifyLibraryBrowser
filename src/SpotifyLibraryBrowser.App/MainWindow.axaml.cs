@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -22,6 +23,12 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _playbackTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private MainWindowViewModel? _model;
     private bool _restoring;
+
+    /// <summary>Set while the closing save is running, so a second close waits for it.</summary>
+    private bool _savingLayout;
+
+    /// <summary>Set once the closing save is over, so the close it makes goes through.</summary>
+    private bool _layoutSaved;
 
     /// <summary>
     /// Room the rest of the window needs below the browser: the toolbar, the splitter, the track
@@ -74,12 +81,28 @@ public partial class MainWindow : Window
         SizeChanged += (_, _) => ConstrainBrowserRow(BrowserGrid.RowDefinitions[1].ActualHeight);
     }
 
-    /// <summary>Saves the layout on the way out.</summary>
+    /// <summary>
+    /// Saves the layout on the way out, holding the window open until the save's finished.
+    /// </summary>
+    /// <remarks>
+    /// The framework only waits for this handler up to its first await. Left to carry on, the
+    /// close would let the process exit partway through the save, with the new settings written
+    /// to the temporary file but never moved over the real one. So the first close is cancelled,
+    /// the save awaited, and the window closed again once it's done.
+    /// </remarks>
     /// <param name="sender">The window</param>
     /// <param name="e">The event data</param>
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        if (_model is null) return;
+        if (_model is null || _layoutSaved) return;
+
+        e.Cancel = true;
+
+        // Another close while the save's running — a second click on the X, say — is left to the
+        // first, which closes the window when it's done.
+        if (_savingLayout) return;
+
+        _savingLayout = true;
 
         // The measured height, not the declared one: a splitter may leave a row star-sized, and
         // Height.Value would then be a star factor rather than a number of pixels.
@@ -90,7 +113,20 @@ public partial class MainWindow : Window
         var measured = BrowserGrid.RowDefinitions[1].ActualHeight;
         var browserHeight = measured > 0 ? measured : _model.SavedBrowserHeight;
 
-        await _model.SaveLayoutAsync(Width, Height, browserHeight);
+        try
+        {
+            await _model.SaveLayoutAsync(Width, Height, browserHeight);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // There's nowhere to report it with the window on its way out, and a failed save
+            // mustn't leave the window unable to close.
+        }
+        finally
+        {
+            _layoutSaved = true;
+            Close();
+        }
     }
 
     /// <summary>
