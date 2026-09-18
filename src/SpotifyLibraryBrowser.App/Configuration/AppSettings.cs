@@ -49,6 +49,16 @@ public sealed class AppSettings
     /// <summary>Whether list rows are tightened up to fit more on screen.</summary>
     public bool CompactRows { get; set; }
 
+    /// <summary>
+    /// How the track list is ordered.
+    /// </summary>
+    /// <remarks>
+    /// Playlist order by default. It changes nothing unless a playlist is being browsed, so
+    /// defaulting to it means selecting a playlist shows it in its own running order without anyone
+    /// having to go looking for the setting.
+    /// </remarks>
+    public TrackSort TrackOrder { get; set; } = TrackSort.PlaylistOrder;
+
     /// <summary>How the discography panel orders an artist's releases.</summary>
     public DiscographySort DiscographySort { get; set; } = DiscographySort.NewestFirst;
 

@@ -13,6 +13,10 @@ public sealed record BrowseValue(string Key, string Display, int TrackCount);
 /// <c>AlbumIsSaved</c> rides along so the track list can offer the right verb for the album
 /// without a second query: an album already in the library is one to remove, and one that only
 /// turned up because a track on it was liked is one to save.
+/// <para>
+/// <c>PlaylistPosition</c> is only filled in while the list is in a playlist's own order, since
+/// that's the only time a playlist number is the number worth showing.
+/// </para>
 /// </remarks>
 public sealed record TrackRow(
     string Id,
@@ -27,7 +31,8 @@ public sealed record TrackRow(
     int DurationMs,
     bool Explicit,
     bool IsLiked,
-    bool AlbumIsSaved);
+    bool AlbumIsSaved,
+    int? PlaylistPosition = null);
 
 /// <summary>The criterion a column groups by, plus whatever the user has selected in it.</summary>
 /// <param name="Criterion">What this column groups by</param>
@@ -47,11 +52,38 @@ public sealed record ColumnSelection(ColumnCriterion Criterion, IReadOnlyList<st
 /// it governs the whole browser rather than any one criterion
 /// </param>
 /// <param name="Search">Free-text match over track, album and artist names</param>
+/// <param name="Sort">How the track list is ordered</param>
 public sealed record BrowseRequest(
     IReadOnlyList<ColumnSelection> Columns,
     bool LikedOnly = false,
     bool SavedAlbumsOnly = false,
-    string? Search = null);
+    string? Search = null,
+    TrackSort Sort = TrackSort.Album)
+{
+    /// <summary>
+    /// The one playlist being browsed, or null when that isn't what's on screen.
+    /// </summary>
+    /// <remarks>
+    /// Playlist order and playlist-context playback both need exactly one: with several selected
+    /// there's no single running order to follow, and with none there's no context at all. Two
+    /// playlist columns narrowing each other count as none for the same reason - what's left is an
+    /// intersection, which has no running order of its own.
+    /// </remarks>
+    public string? SinglePlaylistId
+    {
+        get
+        {
+            var playlists = Columns
+                .Where(c => c.Criterion == ColumnCriterion.Playlist && c.Filters)
+                .ToList();
+
+            return playlists is [{ SelectedKeys: [var only] }] ? only : null;
+        }
+    }
+
+    /// <summary>Whether the track list is actually going to come back in playlist order.</summary>
+    public bool OrdersByPlaylist => Sort == TrackSort.PlaylistOrder && SinglePlaylistId is not null;
+}
 
 /// <summary>A composed SQL statement and the parameters it expects.</summary>
 public sealed record SqlQuery(string Sql, IReadOnlyDictionary<string, object?> Parameters);
@@ -116,13 +148,22 @@ public static class BrowseQueryBuilder
            .Append("al.is_saved AS album_is_saved, substr(al.release_date, 1, 4) AS year, ")
            .Append("(SELECT group_concat(n, ', ') FROM (")
            .Append("SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.id = ta2.artist_id ")
-           .Append("WHERE ta2.track_id = t.id ORDER BY ta2.position)) AS artist_names ")
+           .Append("WHERE ta2.track_id = t.id ORDER BY ta2.position)) AS artist_names, ");
+
+        // pt is in scope exactly when a playlist filters, and OrdersByPlaylist requires one to,
+        // so the alias can't be dangling here. Selecting the position also means a track a playlist
+        // holds twice comes back twice rather than being collapsed by the DISTINCT - which is right,
+        // since in a running order it genuinely is two entries.
+        sql.Append(request.OrdersByPlaylist ? "pt.position" : "NULL")
+           .Append(" AS playlist_position ")
            .Append(BaseFrom).Append(' ');
 
         AppendJoins(sql, CollectCriteria(request.Columns, null));
         AppendWhere(sql, parameters, filtering, request);
 
-        sql.Append(" ORDER BY al.name COLLATE NOCASE, t.disc_number, t.track_number");
+        sql.Append(request.OrdersByPlaylist
+            ? " ORDER BY pt.position"
+            : " ORDER BY al.name COLLATE NOCASE, t.disc_number, t.track_number");
 
         return new SqlQuery(sql.ToString(), parameters);
     }

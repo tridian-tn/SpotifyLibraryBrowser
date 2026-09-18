@@ -47,7 +47,7 @@ public sealed class BrowseRepository(LibraryDatabase database)
     /// <summary>Lists the tracks matching every column selection and toolbar filter.</summary>
     /// <param name="request">The current browser state</param>
     /// <param name="cancel">Cancels the query</param>
-    /// <returns>The matching tracks, in album then disc then track order</returns>
+    /// <returns>The matching tracks, in whichever order the request asked for</returns>
     public async Task<IReadOnlyList<TrackRow>> GetTracksAsync(
         BrowseRequest request,
         CancellationToken cancel = default)
@@ -75,7 +75,8 @@ public sealed class BrowseRepository(LibraryDatabase database)
                 AlbumName: reader.GetString(9),
                 AlbumIsSaved: reader.GetBoolean(10),
                 Year: reader.IsDBNull(11) ? null : reader.GetString(11),
-                ArtistNames: reader.IsDBNull(12) ? string.Empty : reader.GetString(12)));
+                ArtistNames: reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
+                PlaylistPosition: reader.IsDBNull(13) ? null : reader.GetInt32(13)));
         }
 
         return tracks;

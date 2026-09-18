@@ -72,24 +72,30 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
     }
 
     /// <summary>
-    /// Plays an album or playlist, optionally starting partway in.
+    /// Plays an album or playlist, optionally starting on a particular track within it.
     /// </summary>
+    /// <remarks>
+    /// The starting point is given as a track URI rather than an index. Spotify accepts either, but
+    /// an index has to agree with the context's own numbering: a multi-disc album restarts at track
+    /// one on each disc, so a track number is the wrong index, and a playlist's stored positions are
+    /// only as fresh as the last sync. A URI needs neither to be right.
+    /// </remarks>
     /// <param name="contextUri">The album or playlist URI to play</param>
-    /// <param name="offsetPosition">Zero-based index to start at within that context</param>
+    /// <param name="offsetUri">The track URI to start on, or null to start at the beginning</param>
     /// <param name="deviceId">The device to play on, or null for the active one</param>
     /// <param name="cancel">Cancels the request</param>
     /// <returns>Whether playback started, was handed off, or failed</returns>
     public async Task<PlaybackOutcome> PlayContextAsync(
         string contextUri,
-        int? offsetPosition = null,
+        string? offsetUri = null,
         string? deviceId = null,
         CancellationToken cancel = default)
     {
         var request = new PlayerResumePlaybackRequest { ContextUri = contextUri };
 
-        if (offsetPosition is { } position)
+        if (!string.IsNullOrEmpty(offsetUri))
         {
-            request.OffsetParam = new PlayerResumePlaybackRequest.Offset { Position = position };
+            request.OffsetParam = new PlayerResumePlaybackRequest.Offset { Uri = offsetUri };
         }
 
         return await ResumeAsync(request, contextUri, deviceId, cancel).ConfigureAwait(false);
