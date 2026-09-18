@@ -38,6 +38,15 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
     /// <summary>How many tracks a single queue request will add before it stops.</summary>
     public const int MaxQueued = 50;
 
+    /// <summary>
+    /// How a URI reaches the desktop client when Connect won't take it.
+    /// </summary>
+    /// <remarks>
+    /// Swappable so a test can see which URI was chosen without launching anything. Nothing but the
+    /// tests replaces it.
+    /// </remarks>
+    public Func<string, bool> HandOff { get; init; } = OpenInSpotify;
+
     /// <summary>Lists the Connect devices available to play on.</summary>
     /// <param name="cancel">Cancels the call</param>
     /// <returns>The available devices, empty when none are live</returns>
@@ -98,7 +107,12 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
             request.OffsetParam = new PlayerResumePlaybackRequest.Offset { Uri = offsetUri };
         }
 
-        return await ResumeAsync(request, contextUri, deviceId, cancel).ConfigureAwait(false);
+        // The hand-off takes one URI, so a context and a starting track can't both survive it.
+        // The track wins: someone who double-clicked a row wants to hear that row, and hearing it
+        // without the rest of the playlist queued behind it beats hearing something else entirely.
+        var fallback = string.IsNullOrEmpty(offsetUri) ? contextUri : offsetUri;
+
+        return await ResumeAsync(request, fallback, deviceId, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -237,7 +251,7 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
         {
             // No active device, or the account isn't Premium — either way the desktop client can
             // still take it.
-            return OpenInSpotify(fallbackUri) ? PlaybackOutcome.HandedOff : PlaybackOutcome.Failed;
+            return HandOff(fallbackUri) ? PlaybackOutcome.HandedOff : PlaybackOutcome.Failed;
         }
     }
 

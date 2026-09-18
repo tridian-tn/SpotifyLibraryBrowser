@@ -150,19 +150,30 @@ public static class BrowseQueryBuilder
            .Append("SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.id = ta2.artist_id ")
            .Append("WHERE ta2.track_id = t.id ORDER BY ta2.position)) AS artist_names, ");
 
-        // pt is in scope exactly when a playlist filters, and OrdersByPlaylist requires one to,
-        // so the alias can't be dangling here. Selecting the position also means a track a playlist
-        // holds twice comes back twice rather than being collapsed by the DISTINCT - which is right,
-        // since in a running order it genuinely is two entries.
-        sql.Append(request.OrdersByPlaylist ? "pt.position" : "NULL")
-           .Append(" AS playlist_position ")
-           .Append(BaseFrom).Append(' ');
+        // The earliest of a track's positions, looked up per track rather than read off the join.
+        // A playlist may hold the same track twice, and taking the position from the join would
+        // give those two entries different values, which defeats the DISTINCT and lists the track
+        // twice. Every row downstream of here - the count, a like, an unlike, the playback offset -
+        // assumes one row per track, so one row per track is what this returns.
+        if (request.OrdersByPlaylist)
+        {
+            parameters["@pl"] = request.SinglePlaylistId;
+
+            sql.Append("(SELECT MIN(pt2.position) FROM playlist_tracks pt2 ")
+               .Append("WHERE pt2.playlist_id = @pl AND pt2.track_id = t.id)");
+        }
+        else
+        {
+            sql.Append("NULL");
+        }
+
+        sql.Append(" AS playlist_position ").Append(BaseFrom).Append(' ');
 
         AppendJoins(sql, CollectCriteria(request.Columns, null));
         AppendWhere(sql, parameters, filtering, request);
 
         sql.Append(request.OrdersByPlaylist
-            ? " ORDER BY pt.position"
+            ? " ORDER BY playlist_position"
             : " ORDER BY al.name COLLATE NOCASE, t.disc_number, t.track_number");
 
         return new SqlQuery(sql.ToString(), parameters);

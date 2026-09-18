@@ -76,4 +76,25 @@ public sealed class PlaybackTests
 
         Assert.NotEqual(PlaybackOutcome.Started, outcome);
     }
+
+    [Fact]
+    public async Task A_refused_play_hands_off_the_track_rather_than_the_context()
+    {
+        var player = Substitute.For<IPlayerClient>();
+        var handed = new List<string>();
+        var controller = new PlaybackController(player, Throttle()) { HandOff = uri => { handed.Add(uri); return true; } };
+
+        player.ResumePlayback(Arg.Any<PlayerResumePlaybackRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<bool>>(_ => throw new APIException("No active device found"));
+
+        await controller.PlayContextAsync("spotify:playlist:pl-1", "spotify:track:tr-warsaw");
+
+        // One URI is all the hand-off carries, so the context can't come with it. The clicked track
+        // is the half worth keeping - playing the playlist from the top would be the wrong song.
+        Assert.Equal(["spotify:track:tr-warsaw"], handed);
+
+        // With no starting track asked for, the context is all there is to hand over.
+        await controller.PlayContextAsync("spotify:album:al-kob");
+        Assert.Equal(["spotify:track:tr-warsaw", "spotify:album:al-kob"], handed);
+    }
 }

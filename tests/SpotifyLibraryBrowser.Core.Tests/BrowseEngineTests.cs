@@ -385,12 +385,13 @@ public sealed class BrowseEngineTests
     }
 
     [Fact]
-    public async Task Playlist_order_shows_a_repeated_track_once_per_entry()
+    public async Task A_track_a_playlist_holds_twice_is_still_one_row()
     {
         await using var fixture = await LibraryFixture.CreateAsync();
 
-        // A playlist is allowed to hold the same track twice, and in a running order that really
-        // is two entries rather than one row to be collapsed.
+        // A playlist is allowed to hold the same track more than once. Listing it once per entry
+        // would be faithful to the running order but would break everything that treats a row as a
+        // track: the count, a like, an unlike, and starting playback on the row that was clicked.
         await using (var writer = await fixture.Library.BeginWriteAsync())
         {
             await writer.AddPlaylistTrackAsync("pl-1", "tr-sowhat", 3, null);
@@ -402,11 +403,12 @@ public sealed class BrowseEngineTests
 
         var tracks = await fixture.Browse.GetTracksAsync(request);
 
-        Assert.Equal(["So What", "Warszawa", "Roygbiv", "So What"], tracks.Select(t => t.Name));
+        // One row, at the earlier of its two positions.
+        Assert.Equal(["So What", "Warszawa", "Roygbiv"], tracks.Select(t => t.Name));
+        Assert.Equal([0, 1, 2], tracks.Select(t => t.PlaylistPosition));
 
-        // Album order collapses it back to one, which is what grouping by record should do.
-        var byAlbum = await fixture.Browse.GetTracksAsync(request with { Sort = TrackSort.Album });
-        Assert.Single(byAlbum, t => t.Name == "So What");
+        // And the count agrees with the rows, rather than counting playlist entries.
+        Assert.Equal(3, await fixture.Browse.CountTracksAsync(request));
     }
 
     [Fact]
