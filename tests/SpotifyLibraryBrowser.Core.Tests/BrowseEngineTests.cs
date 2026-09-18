@@ -324,6 +324,94 @@ public sealed class BrowseEngineTests
     }
 
     [Fact]
+    public async Task Playlist_order_follows_the_playlist_rather_than_the_albums()
+    {
+        await using var fixture = await LibraryFixture.CreateAsync();
+        var playlist = Select(Columns(ColumnCriterion.Playlist), 0, "pl-1");
+
+        // Album order groups the same three tracks by record, which is the order that loses the
+        // point of a playlist: Geogaddi, Kind of Blue, Low.
+        var byAlbum = await fixture.Browse.GetTracksAsync(playlist);
+        Assert.Equal(["Roygbiv", "So What", "Warszawa"], byAlbum.Select(t => t.Name));
+        Assert.All(byAlbum, t => Assert.Null(t.PlaylistPosition));
+
+        var byPlaylist = await fixture.Browse.GetTracksAsync(
+            playlist with { Sort = TrackSort.PlaylistOrder });
+
+        Assert.Equal(["So What", "Warszawa", "Roygbiv"], byPlaylist.Select(t => t.Name));
+        Assert.Equal([0, 1, 2], byPlaylist.Select(t => t.PlaylistPosition));
+    }
+
+    [Fact]
+    public async Task Playlist_order_still_honours_the_toolbar_filters()
+    {
+        await using var fixture = await LibraryFixture.CreateAsync();
+
+        var request = Select(Columns(ColumnCriterion.Playlist), 0, "pl-1")
+            with { Sort = TrackSort.PlaylistOrder, SavedAlbumsOnly = true };
+
+        var tracks = await fixture.Browse.GetTracksAsync(request);
+
+        // Roygbiv's album was never saved, so it goes — and what's left keeps the playlist's own
+        // numbering rather than being renumbered from one.
+        Assert.Equal(["So What", "Warszawa"], tracks.Select(t => t.Name));
+        Assert.Equal([0, 1], tracks.Select(t => t.PlaylistPosition));
+    }
+
+    [Fact]
+    public async Task Playlist_order_needs_exactly_one_playlist_to_mean_anything()
+    {
+        await using var fixture = await LibraryFixture.CreateAsync();
+        var asked = Columns(ColumnCriterion.Playlist) with { Sort = TrackSort.PlaylistOrder };
+
+        // Asked for but nothing selected: "All playlists" has no running order of its own.
+        Assert.Null(asked.SinglePlaylistId);
+        Assert.False(asked.OrdersByPlaylist);
+
+        // Nor does a multi-selection, even though each playlist in it has one.
+        var several = Select(asked, 0, "pl-1", "pl-empty");
+        Assert.Null(several.SinglePlaylistId);
+        Assert.False(several.OrdersByPlaylist);
+
+        // And the query still runs, in album order, rather than failing on a dangling alias.
+        var tracks = await fixture.Browse.GetTracksAsync(several);
+        Assert.Equal(["Roygbiv", "So What", "Warszawa"], tracks.Select(t => t.Name));
+
+        // Two playlist columns narrowing each other leave an intersection, which has no order either.
+        var crossed = Columns(ColumnCriterion.Playlist, ColumnCriterion.Playlist)
+            with { Sort = TrackSort.PlaylistOrder };
+
+        Assert.Null(Select(Select(crossed, 0, "pl-1"), 1, "pl-1").SinglePlaylistId);
+    }
+
+    [Fact]
+    public async Task A_track_a_playlist_holds_twice_is_still_one_row()
+    {
+        await using var fixture = await LibraryFixture.CreateAsync();
+
+        // A playlist is allowed to hold the same track more than once. Listing it once per entry
+        // would be faithful to the running order but would break everything that treats a row as a
+        // track: the count, a like, an unlike, and starting playback on the row that was clicked.
+        await using (var writer = await fixture.Library.BeginWriteAsync())
+        {
+            await writer.AddPlaylistTrackAsync("pl-1", "tr-sowhat", 3, null);
+            await writer.CommitAsync();
+        }
+
+        var request = Select(Columns(ColumnCriterion.Playlist), 0, "pl-1")
+            with { Sort = TrackSort.PlaylistOrder };
+
+        var tracks = await fixture.Browse.GetTracksAsync(request);
+
+        // One row, at the earlier of its two positions.
+        Assert.Equal(["So What", "Warszawa", "Roygbiv"], tracks.Select(t => t.Name));
+        Assert.Equal([0, 1, 2], tracks.Select(t => t.PlaylistPosition));
+
+        // And the count agrees with the rows, rather than counting playlist entries.
+        Assert.Equal(3, await fixture.Browse.CountTracksAsync(request));
+    }
+
+    [Fact]
     public async Task Multi_valued_joins_do_not_inflate_the_track_list()
     {
         await using var fixture = await LibraryFixture.CreateAsync();

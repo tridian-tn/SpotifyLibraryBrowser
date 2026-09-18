@@ -42,8 +42,18 @@ public sealed partial class TrackViewModel(TrackRow row) : ObservableObject
     /// <summary>The album's Spotify URI, used to play the track in album context.</summary>
     public string AlbumUri => $"spotify:album:{Row.AlbumId}";
 
-    /// <summary>The track's index within its album, used as the playback offset.</summary>
+    /// <summary>The track's index within its album.</summary>
     public int TrackNumber => Row.TrackNumber;
+
+    /// <summary>
+    /// The number shown in the list's "#" column.
+    /// </summary>
+    /// <remarks>
+    /// Whichever number matches the order on screen: a playlist's running order numbers its own
+    /// entries, and anything else numbers tracks within their album. Showing album track numbers
+    /// against a playlist's order would read as a list that had lost its sort.
+    /// </remarks>
+    public string Number => (Row.PlaylistPosition + 1)?.ToString() ?? Row.TrackNumber.ToString();
 
     /// <summary>The release year, blank when the album has no usable date.</summary>
     public string Year => Row.Year ?? string.Empty;

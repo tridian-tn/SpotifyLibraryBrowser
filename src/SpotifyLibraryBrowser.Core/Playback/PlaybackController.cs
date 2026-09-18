@@ -38,6 +38,15 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
     /// <summary>How many tracks a single queue request will add before it stops.</summary>
     public const int MaxQueued = 50;
 
+    /// <summary>
+    /// How a URI reaches the desktop client when Connect won't take it.
+    /// </summary>
+    /// <remarks>
+    /// Swappable so a test can see which URI was chosen without launching anything. Nothing but the
+    /// tests replaces it.
+    /// </remarks>
+    public Func<string, bool> HandOff { get; init; } = OpenInSpotify;
+
     /// <summary>Lists the Connect devices available to play on.</summary>
     /// <param name="cancel">Cancels the call</param>
     /// <returns>The available devices, empty when none are live</returns>
@@ -72,27 +81,38 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
     }
 
     /// <summary>
-    /// Plays an album or playlist, optionally starting partway in.
+    /// Plays an album or playlist, optionally starting on a particular track within it.
     /// </summary>
+    /// <remarks>
+    /// The starting point is given as a track URI rather than an index. Spotify accepts either, but
+    /// an index has to agree with the context's own numbering: a multi-disc album restarts at track
+    /// one on each disc, so a track number is the wrong index, and a playlist's stored positions are
+    /// only as fresh as the last sync. A URI needs neither to be right.
+    /// </remarks>
     /// <param name="contextUri">The album or playlist URI to play</param>
-    /// <param name="offsetPosition">Zero-based index to start at within that context</param>
+    /// <param name="offsetUri">The track URI to start on, or null to start at the beginning</param>
     /// <param name="deviceId">The device to play on, or null for the active one</param>
     /// <param name="cancel">Cancels the request</param>
     /// <returns>Whether playback started, was handed off, or failed</returns>
     public async Task<PlaybackOutcome> PlayContextAsync(
         string contextUri,
-        int? offsetPosition = null,
+        string? offsetUri = null,
         string? deviceId = null,
         CancellationToken cancel = default)
     {
         var request = new PlayerResumePlaybackRequest { ContextUri = contextUri };
 
-        if (offsetPosition is { } position)
+        if (!string.IsNullOrEmpty(offsetUri))
         {
-            request.OffsetParam = new PlayerResumePlaybackRequest.Offset { Position = position };
+            request.OffsetParam = new PlayerResumePlaybackRequest.Offset { Uri = offsetUri };
         }
 
-        return await ResumeAsync(request, contextUri, deviceId, cancel).ConfigureAwait(false);
+        // The hand-off takes one URI, so a context and a starting track can't both survive it.
+        // The track wins: someone who double-clicked a row wants to hear that row, and hearing it
+        // without the rest of the playlist queued behind it beats hearing something else entirely.
+        var fallback = string.IsNullOrEmpty(offsetUri) ? contextUri : offsetUri;
+
+        return await ResumeAsync(request, fallback, deviceId, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -231,7 +251,7 @@ public sealed class PlaybackController(IPlayerClient player, RequestThrottle thr
         {
             // No active device, or the account isn't Premium — either way the desktop client can
             // still take it.
-            return OpenInSpotify(fallbackUri) ? PlaybackOutcome.HandedOff : PlaybackOutcome.Failed;
+            return HandOff(fallbackUri) ? PlaybackOutcome.HandedOff : PlaybackOutcome.Failed;
         }
     }
 

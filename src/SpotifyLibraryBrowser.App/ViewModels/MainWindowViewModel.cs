@@ -84,6 +84,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private bool _compactRows;
 
+    /// <summary>How the track list is ordered.</summary>
+    [ObservableProperty]
+    private TrackSort _trackOrder = TrackSort.PlaylistOrder;
+
+    /// <summary>
+    /// The playlist the track list is currently showing, or null when it isn't showing one.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes playlist order and playlist-context playback possible, so it's kept in
+    /// step with the browser rather than worked out afresh at each use.
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanOrderByPlaylist))]
+    private string? _playlistContextId;
+
     [ObservableProperty]
     private bool _isBusy;
 
@@ -126,6 +141,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     /// <summary>The discography panel, shown when a single artist is selected.</summary>
     public DiscographyPanelViewModel Discography { get; } = new();
+
+    /// <summary>The track orders offered, paired with something readable.</summary>
+    public IReadOnlyList<TrackOrderChoice> TrackOrderChoices { get; } =
+    [
+        new(TrackSort.PlaylistOrder, "Playlist order"),
+        new(TrackSort.Album, "Album order")
+    ];
+
+    /// <summary>
+    /// Whether playlist order is on offer, which is only while one playlist is being browsed.
+    /// </summary>
+    /// <remarks>The picker hides itself otherwise, the way the discography panel does.</remarks>
+    public bool CanOrderByPlaylist => PlaylistContextId is not null;
 
     /// <summary>
     /// The tracks matching the current selection.
@@ -181,6 +209,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         LikedOnly = _settings.LikedOnly;
         SavedAlbumsOnly = _settings.SavedAlbumsOnly;
         CompactRows = _settings.CompactRows;
+        TrackOrder = _settings.TrackOrder;
 
         _database = await LibraryDatabase.OpenAsync(AppPaths.DatabaseFile);
         _repository = new LibraryRepository(_database);
@@ -315,17 +344,25 @@ public sealed partial class MainWindowViewModel : ObservableObject
         await RefreshFromAsync(Columns.Count - 1);
     }
 
-    /// <summary>Plays a track, in its album's context so the rest of the record follows on.</summary>
+    /// <summary>
+    /// Plays a track in whatever context it's being browsed in, so the right thing follows on.
+    /// </summary>
+    /// <remarks>
+    /// A playlist's tracks play within the playlist; anything else plays within its album. Picking
+    /// the album while looking at a playlist is the wrong answer - it abandons the playlist after
+    /// one track and carries on through a record the user wasn't listening to.
+    /// </remarks>
     /// <param name="track">The track to play</param>
     [RelayCommand]
     private async Task PlayTrackAsync(TrackViewModel? track)
     {
         if (track is null || _playback is null) return;
 
-        var outcome = await _playback.PlayContextAsync(
-            track.AlbumUri,
-            Math.Max(0, track.TrackNumber - 1),
-            SelectedDevice?.Id);
+        var context = PlaylistContextId is { } playlist
+            ? $"spotify:playlist:{playlist}"
+            : track.AlbumUri;
+
+        var outcome = await _playback.PlayContextAsync(context, track.Uri, SelectedDevice?.Id);
 
         Status = outcome switch
         {
@@ -632,6 +669,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _settings.LikedOnly = LikedOnly;
         _settings.SavedAlbumsOnly = SavedAlbumsOnly;
         _settings.CompactRows = CompactRows;
+        _settings.TrackOrder = TrackOrder;
         _settings.DiscographySort = Discography.Sort;
         _settings.DiscographyGroups = Discography.Groups;
         _settings.Columns = Columns.Select(c => c.Criterion.Criterion).ToList();
@@ -730,6 +768,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IReadOnlyList<DiscographyTrack> tracks)
     {
         _showingDiscographyAlbum = true;
+        PlaylistContextId = null;
 
         SelectedTracks.Clear();
         Tracks = new ObservableCollection<TrackViewModel>(
@@ -915,7 +954,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <returns>The current browse request</returns>
     private BrowseRequest BuildRequest() =>
         new(Columns.Select(c => c.ToSelection()).ToList(), LikedOnly, SavedAlbumsOnly,
-            string.IsNullOrWhiteSpace(Search) ? null : Search);
+            string.IsNullOrWhiteSpace(Search) ? null : Search, TrackOrder);
 
     /// <summary>Reloads the track list for the current state.</summary>
     /// <param name="cancel">Cancels the query</param>
@@ -923,7 +962,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (_browse is null) return;
 
-        var rows = await _browse.GetTracksAsync(BuildRequest(), cancel);
+        var request = BuildRequest();
+        var rows = await _browse.GetTracksAsync(request, cancel);
+
+        // Which playlist the list is showing, if any, drives both the order picker and what
+        // double-clicking a row plays within.
+        PlaylistContextId = request.SinglePlaylistId;
 
         // The list is going back to reflecting the browser, so the panel's opened release stops
         // being what's on show and shouldn't stay highlighted.
@@ -969,6 +1013,36 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _ = PersistSettingsAsync();
     }
 
+    /// <summary>Reorders the track list and remembers the choice.</summary>
+    /// <param name="value">The order picked</param>
+    partial void OnTrackOrderChanged(TrackSort value)
+    {
+        _settings.TrackOrder = value;
+        _ = PersistSettingsAsync();
+        _ = ReorderTracksAsync();
+    }
+
+    /// <summary>
+    /// Re-queries the track list alone, for a change that only affects the order it comes back in.
+    /// </summary>
+    /// <remarks>The columns don't depend on the order, so there's no reason to rebuild them.</remarks>
+    private async Task ReorderTracksAsync()
+    {
+        if (_browse is null) return;
+
+        _refresh?.Cancel();
+        var cts = new CancellationTokenSource();
+        _refresh = cts;
+
+        try
+        {
+            await RefreshTracksAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
     /// <summary>Re-queries and remembers the choice when the saved-albums filter is toggled.</summary>
     /// <param name="value">Whether browsing is restricted to saved albums</param>
     partial void OnSavedAlbumsOnlyChanged(bool value)
@@ -991,3 +1065,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 }
+
+/// <summary>One entry in the track order picker.</summary>
+/// <param name="Value">The order this choice selects</param>
+/// <param name="Label">What the picker shows for it</param>
+public sealed record TrackOrderChoice(TrackSort Value, string Label);

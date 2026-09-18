@@ -191,6 +191,19 @@
                           IsChecked="{Binding SavedAlbumsOnly}"
                           ToolTip.Tip="Restrict every column and the track list to albums in your library. Turn off to see liked songs and playlist tracks whose albums you haven't saved." />
 
+                <ComboBox DockPanel.Dock="Left" Margin="12,0,0,0" Width="140"
+                          IsVisible="{Binding CanOrderByPlaylist}"
+                          ItemsSource="{Binding TrackOrderChoices}"
+                          SelectedValue="{Binding TrackOrder, Mode=TwoWay}"
+                          SelectedValueBinding="{Binding Value}"
+                          ToolTip.Tip="Show this playlist in its own running order, or grouped by album.">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:TrackOrderChoice">
+                            <TextBlock Text="{Binding Label}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
                 <TextBox DockPanel.Dock="Left" Margin="16,0,0,0" Width="220"
                          Text="{Binding Search}" PlaceholderText="Search library" />
 
@@ -370,7 +383,7 @@
                             </DataTemplate>
                         </TableViewColumn.CellTemplate>
                     </TableViewColumn>
-                    <TableViewColumn Header="#" Binding="{Binding TrackNumber}" Width="44" />
+                    <TableViewColumn Header="#" Binding="{Binding Number}" Width="44" />
                     <TableViewColumn Header="Title" Binding="{Binding Name}" Width="3*" />
                     <TableViewColumn Header="Artist" Binding="{Binding ArtistNames}" Width="2*" />
                     <TableViewColumn Header="Album" Binding="{Binding AlbumName}" Width="2*" />
