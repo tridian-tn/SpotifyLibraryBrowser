@@ -42,7 +42,7 @@ public sealed class DiscographyService(
     private const int TrackPageSize = 50;
 
     /// <summary>How many track URIs one liked-state check may carry.</summary>
-    private const int CheckBatchSize = 50;
+    private const int CheckBatchSize = 40;
 
     /// <summary>
     /// Gets an artist's releases, fetching them if they aren't cached.

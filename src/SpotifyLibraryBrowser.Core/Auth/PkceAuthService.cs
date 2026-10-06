@@ -1,5 +1,6 @@
 using SpotifyAPI.Web;
 using SpotifyAPI.Web.Auth;
+using SpotifyLibraryBrowser.Core.Api;
 
 namespace SpotifyLibraryBrowser.Core.Auth;
 
@@ -69,8 +70,8 @@ public sealed class PkceAuthService(string clientId, TokenStore store, int callb
     /// Builds a client from the stored refresh token, without showing a browser.
     /// </summary>
     /// <param name="cancel">Cancels the restore</param>
-    /// <returns>An authenticated client, or null when there's no usable stored token</returns>
-    public async Task<SpotifyClient?> TryRestoreAsync(CancellationToken cancel = default)
+    /// <returns>An authenticated session, or null when there's no usable stored token</returns>
+    public async Task<SpotifySession?> TryRestoreAsync(CancellationToken cancel = default)
     {
         var stored = await store.LoadAsync(cancel).ConfigureAwait(false);
         if (stored is null) return null;
@@ -94,7 +95,7 @@ public sealed class PkceAuthService(string clientId, TokenStore store, int callb
                 .ConfigureAwait(false);
 
             await PersistAsync(refreshed, cancel).ConfigureAwait(false);
-            return BuildClient(refreshed);
+            return BuildSession(refreshed);
         }
         catch (APIException)
         {
@@ -108,8 +109,8 @@ public sealed class PkceAuthService(string clientId, TokenStore store, int callb
     /// Runs the interactive flow: opens the browser, waits for the callback, exchanges the code.
     /// </summary>
     /// <param name="cancel">Cancels the wait for the callback</param>
-    /// <returns>An authenticated client</returns>
-    public async Task<SpotifyClient> AuthorizeAsync(CancellationToken cancel = default)
+    /// <returns>An authenticated session</returns>
+    public async Task<SpotifySession> AuthorizeAsync(CancellationToken cancel = default)
     {
         var (verifier, challenge) = PKCEUtil.GenerateCodes();
         var completion = new TaskCompletionSource<AuthorizationCodeResponse>(
@@ -153,7 +154,7 @@ public sealed class PkceAuthService(string clientId, TokenStore store, int callb
                 .ConfigureAwait(false);
 
             await PersistAsync(token, cancel).ConfigureAwait(false);
-            return BuildClient(token);
+            return BuildSession(token);
         }
         finally
         {
@@ -167,8 +168,8 @@ public sealed class PkceAuthService(string clientId, TokenStore store, int callb
     /// Wraps a token in a client that refreshes itself, persisting each refreshed token.
     /// </summary>
     /// <param name="token">The token to authenticate with</param>
-    /// <returns>The configured client</returns>
-    private SpotifyClient BuildClient(PKCETokenResponse token)
+    /// <returns>The configured client, with the library client that has to stand in for its own</returns>
+    private SpotifySession BuildSession(PKCETokenResponse token)
     {
         var authenticator = new PKCEAuthenticator(clientId, token);
 
@@ -189,7 +190,12 @@ public sealed class PkceAuthService(string clientId, TokenStore store, int callb
                 TooManyRequestsConsumesARetry = false
             });
 
-        return new SpotifyClient(config);
+        // Built here rather than inside SpotifyClient so the library client can share it.
+        var api = config.BuildAPIConnector();
+
+        return new SpotifySession(
+            new SpotifyClient(config.WithAPIConnector(api)),
+            new QueryStringLibraryClient(api));
     }
 
     /// <summary>Saves a token and lets listeners know.</summary>
@@ -226,3 +232,8 @@ public sealed class PkceAuthService(string clientId, TokenStore store, int callb
         CreatedAt = stored.CreatedAt
     };
 }
+
+/// <summary>An authenticated client, with the library client to use in place of its own.</summary>
+/// <param name="Client">The client for everything else</param>
+/// <param name="Library">The library endpoints, with saving and removing that work</param>
+public sealed record SpotifySession(SpotifyClient Client, ILibraryClient Library);

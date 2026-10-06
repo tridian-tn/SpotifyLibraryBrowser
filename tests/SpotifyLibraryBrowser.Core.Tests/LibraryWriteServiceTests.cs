@@ -96,8 +96,8 @@ public sealed class LibraryWriteServiceTests
         var library = Substitute.For<ILibraryClient>();
         var service = new LibraryWriteService(library, fixture.Library, Throttle());
 
-        // 120 IDs is three requests at the API's 50-URI cap.
-        var ids = Enumerable.Range(0, 120).Select(i => $"tr-bulk-{i}").ToList();
+        // 100 IDs is three requests at the API's 40-URI cap, the last one part-full.
+        var ids = Enumerable.Range(0, 100).Select(i => $"tr-bulk-{i}").ToList();
 
         await service.SetTracksLikedAsync(ids, true);
 
