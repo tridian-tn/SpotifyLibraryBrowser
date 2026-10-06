@@ -21,8 +21,8 @@ public sealed class LibraryWriteService(
     LibraryRepository repository,
     RequestThrottle throttle)
 {
-    /// <summary>The API caps a library write at this many URIs, so bigger selections are chunked.</summary>
-    private const int MaxUrisPerRequest = 50;
+    /// <summary>The API caps a library write or check at this many URIs, so bigger selections are chunked.</summary>
+    private const int MaxUrisPerRequest = 40;
 
     /// <summary>
     /// Likes or unlikes a set of tracks, keeping the local index and Spotify in step.

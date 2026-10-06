@@ -230,16 +230,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _auth = CreateAuthService(_settings.ClientId);
 
         Status = "Restoring session…";
-        var client = await _auth.TryRestoreAsync();
+        var session = await _auth.TryRestoreAsync();
 
-        if (client is null)
+        if (session is null)
         {
             State = AppState.SignedOut;
             Status = "Sign in to load your library.";
             return;
         }
 
-        await OnSignedInAsync(client);
+        await OnSignedInAsync(session);
     }
 
     /// <summary>
@@ -298,8 +298,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             IsBusy = true;
             Status = "Waiting for Spotify in your browser…";
 
-            var client = await _auth.AuthorizeAsync();
-            await OnSignedInAsync(client);
+            var session = await _auth.AuthorizeAsync();
+            await OnSignedInAsync(session);
         }
         catch (Exception e)
         {
@@ -866,18 +866,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>Wires up the services that need an authenticated client.</summary>
-    /// <param name="client">The freshly authenticated client</param>
-    private async Task OnSignedInAsync(SpotifyClient client)
+    /// <param name="session">The freshly authenticated client and its library endpoints</param>
+    private async Task OnSignedInAsync(SpotifySession session)
     {
+        var client = session.Client;
+
         _sync = new LibrarySyncService(client, _repository!, _throttle);
-        _library = new LibraryWriteService(client.Library, _repository!, _throttle);
+        _library = new LibraryWriteService(session.Library, _repository!, _throttle);
         _playback = new PlaybackController(client.Player, _throttle);
 
         Discography.Connect(
             new DiscographyService(client.Artists, client.Albums, _discographyStore!, _throttle),
             _library,
             _playback,
-            client.Library);
+            session.Library);
 
         State = AppState.Ready;
 
